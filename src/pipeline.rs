@@ -200,6 +200,10 @@ async fn try_start(state: &Arc<AppState>, handle: &Arc<PipelineHandle>) -> Resul
                     last_kind = SegmentKind::Music;
                 }
                 SegmentKind::Silence => {
+                    // Realtime providers (server VAD) need a *continuous*
+                    // audio stream to detect end-of-speech, so forward
+                    // silence frames downstream too. Only music is dropped.
+                    let _ = speech_tx.try_send(frame.clone());
                     if matches!(last_kind, SegmentKind::Speech) {
                         let frame_ms = (frame.len() as u64 * 1000
                             / spec_rate as u64) as u32;

@@ -88,8 +88,6 @@ pub mod qwen {
                 .with_context(|| "build qwen ws request")?;
             req.headers_mut()
                 .insert("Authorization", http::HeaderValue::from_str(&format!("Bearer {}", self.cfg.api_key))?);
-            req.headers_mut()
-                .insert("OpenAI-Beta", http::HeaderValue::from_static("realtime=v1"));
 
             let (ws, _resp) = tokio_tungstenite::connect_async(req)
                 .await
@@ -97,24 +95,26 @@ pub mod qwen {
             info!("connected to qwen realtime");
             let (mut write_half, mut read_half) = ws.split();
 
-            // Configure session.
+            // Configure session. Protocol per the official
+            // qwen3.5-livetranslate-flash-realtime docs:
+            //   * `translation.language` selects the target language
+            //     (default would be "en", so this is mandatory for us).
+            //   * `input_audio_transcription` only accepts the dedicated ASR
+            //     model name or null; we disable ASR because the overlay
+            //     shows the translation stream only.
+            //   * server VAD mode: the server detects speech end itself and
+            //     auto-commits, so we must feed it a *continuous* audio
+            //     stream (the pipeline forwards silence frames too).
+            //   * `instructions` is not part of this model's session schema.
             let session = serde_json::json!({
                 "type": "session.update",
                 "session": {
                     "modalities": ["text"],
-                    "input_audio_format": "pcm16",
-                    "input_audio_transcription": {
-                        "model": self.cfg.model,
-                    },
-                    "turn_detection": null,
-                    "voice": null,
-                    "instructions": self.cfg.system_prompt.clone().unwrap_or_else(|| {
-                        format!(
-                            "你是一个实时同声传译员。识别到的语种如果是中文，原样输出；其它语种翻译成{lang}输出，\
-                             仅输出最终字幕文本，不要附加解释或标签。",
-                            lang = self.cfg.target_lang
-                        )
-                    })
+                    "sample_rate": 16000,
+                    "input_audio_format": "pcm",
+                    "input_audio_transcription": null,
+                    "turn_detection": { "type": "server_vad" },
+                    "translation": { "language": self.cfg.target_lang }
                 }
             });
             write_half
@@ -155,7 +155,8 @@ pub mod qwen {
                 }
             };
 
-            // Audio pump.
+            // Audio pump. In server-VAD mode we only append; the server
+            // commits the buffer on detected end-of-speech by itself.
             let write = async move {
                 while let Some(chunk) = audio_rx.recv().await {
                     if chunk.is_empty() {
@@ -174,11 +175,10 @@ pub mod qwen {
                         break;
                     }
                 }
+                // Flush the tail of the session, then close gracefully.
                 let _ = write_half
                     .send(Message::Text(
-                        serde_json::json!({"type": "input_audio_buffer.commit"})
-                            .to_string()
-                            .into(),
+                        serde_json::json!({"type": "session.finish"}).to_string().into(),
                     ))
                     .await;
                 let _ = write_half.close().await;
@@ -203,22 +203,30 @@ pub mod qwen {
         SessionUpdated {
             session: serde_json::Value,
         },
-        #[serde(rename = "conversation.item.input_audio_transcription.delta")]
-        Delta {
-            delta: String,
+        /// Streaming translation increment (modalities=["text"]). `text` is
+        /// the confirmed text *for this event*; `stash` is speculative tail.
+        #[serde(rename = "response.text.text")]
+        ResponseTextText {
+            #[serde(default)]
+            text: String,
+            #[serde(default)]
+            stash: Option<String>,
             #[serde(default)]
             item_id: Option<String>,
         },
+        /// Final complete translation of one utterance.
+        #[serde(rename = "response.text.done")]
+        ResponseTextDone {
+            #[serde(default)]
+            text: String,
+        },
+        /// Source-language ASR stream (only when transcription is enabled).
         #[serde(rename = "conversation.item.input_audio_transcription.completed")]
         Completed {
             transcript: String,
             #[serde(default)]
             item_id: Option<String>,
         },
-        #[serde(rename = "response.text.delta")]
-        ResponseTextDelta { delta: String },
-        #[serde(rename = "response.text.done")]
-        ResponseTextDone { text: String },
         #[serde(rename = "error")]
         Error { error: serde_json::Value },
         #[serde(other)]
@@ -227,20 +235,22 @@ pub mod qwen {
 
     fn handle_event(ev: &QwenEvent, sink: &SubtitleSink) {
         match ev {
-            QwenEvent::Delta { delta, .. } => {
-                if !delta.is_empty() {
-                    sink.push(SubtitleEvent::Partial(delta.clone()));
+            // NOTE: the sink *appends* partials, so we forward only the
+            // confirmed increment. The speculative `stash` is dropped here
+            // and restored by `ResponseTextDone` (Final supersedes the
+            // partial buffer when it is longer).
+            QwenEvent::ResponseTextText { text, .. } => {
+                if !text.is_empty() {
+                    sink.push(SubtitleEvent::Partial(text.clone()));
                 }
             }
-            QwenEvent::Completed { transcript, .. } | QwenEvent::ResponseTextDone { text: transcript } => {
-                if !transcript.is_empty() {
-                    sink.push(SubtitleEvent::Final(transcript.clone()));
+            QwenEvent::ResponseTextDone { text } => {
+                if !text.is_empty() {
+                    sink.push(SubtitleEvent::Final(text.trim().to_string()));
                 }
             }
-            QwenEvent::ResponseTextDelta { delta } => {
-                if !delta.is_empty() {
-                    sink.push(SubtitleEvent::Partial(delta.clone()));
-                }
+            QwenEvent::Completed { .. } => {
+                // ASR is disabled in session.update; ignore defensively.
             }
             QwenEvent::Error { error } => {
                 warn!(?error, "qwen error event");
