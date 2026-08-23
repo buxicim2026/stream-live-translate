@@ -122,7 +122,7 @@ static void slt_mutex_unlock(slt_mutex_t *m)
 #define SLT_RING_BYTES (2 * 1024 * 1024)
 
 struct slt_sender {
-	slt_mutex_t *mutex;
+	slt_mutex_t mutex;
 	os_event_t *wake;
 	os_event_t *stop;
 	uint8_t *ring;
@@ -465,9 +465,9 @@ static void sender_loop(void)
 		/* Drain the ring buffer and stream it out. */
 		for (;;) {
 			size_t len;
-			slt_mutex_lock(g_sender.mutex);
+			slt_mutex_lock(&g_sender.mutex);
 			len = ring_pop(chunk, 16 * 1024);
-			slt_mutex_unlock(g_sender.mutex);
+			slt_mutex_unlock(&g_sender.mutex);
 			if (len == 0)
 				break;
 			/* Drop a stray trailing byte (should not happen). */
@@ -572,9 +572,9 @@ static void filter_update(void *data, obs_data_t *settings)
 	uint32_t port = (uint32_t)obs_data_get_int(settings, "port");
 	if (port != g_sender.port) {
 		g_sender.port = port;
-		slt_mutex_lock(g_sender.mutex);
+		slt_mutex_lock(&g_sender.mutex);
 		g_sender.head = g_sender.tail = g_sender.used = 0;
-		slt_mutex_unlock(g_sender.mutex);
+		slt_mutex_unlock(&g_sender.mutex);
 		g_sender.reconnect_requested = true;
 	}
 }
@@ -624,7 +624,7 @@ static struct obs_audio_data *filter_audio(void *data,
 	if (!f->gate_silence || rms >= SLT_RMS_GATE) {
 		const uint32_t rate =
 			audio_output_get_sample_rate(obs_get_audio());
-		slt_mutex_lock(g_sender.mutex);
+		slt_mutex_lock(&g_sender.mutex);
 		if (rate != g_sender.in_rate) {
 			/* Sample rate changed: restart resampler state. */
 			g_sender.in_rate = rate ? rate : 48000;
@@ -632,7 +632,7 @@ static struct obs_audio_data *filter_audio(void *data,
 			g_sender.head = g_sender.tail = g_sender.used = 0;
 		}
 		ring_push((const uint8_t *)mono, frames * sizeof(int16_t));
-		slt_mutex_unlock(g_sender.mutex);
+		slt_mutex_unlock(&g_sender.mutex);
 		os_event_signal(g_sender.wake);
 	}
 
@@ -710,7 +710,7 @@ void obs_module_unload(void)
 
 	os_event_destroy(g_sender.stop);
 	os_event_destroy(g_sender.wake);
-	slt_mutex_destroy(g_sender.mutex);
+	slt_mutex_destroy(&g_sender.mutex);
 	bfree(g_sender.ring);
 	g_sender.ring = NULL;
 

@@ -37,7 +37,7 @@ OBS 源（媒体源/窗口采集/…）
 
 ## 安装（免安装，复制即用）
 
-从 GitHub Releases 下载对应平台的插件包并解压，把 `stream-live-translate` 文件夹放到：
+从 GitHub Releases 下载对应平台的插件包并解压，把 `stream-live-translate` 文件夹**整个**放到：
 
 | 平台 | 插件目录（推荐，无需管理员权限） |
 | --- | --- |
@@ -45,7 +45,10 @@ OBS 源（媒体源/窗口采集/…）
 | Linux | `~/.config/obs-studio/plugins/` |
 | macOS (Apple Silicon) | `~/Library/Application Support/obs-studio/plugins/` |
 
-也可以放进 OBS 安装目录下的 `plugins\` 文件夹（需要写权限）。重启 OBS 即可。
+> **注意**：必须保留解压后的目录结构，即最终路径形如
+> `%APPDATA%\obs-studio\plugins\stream-live-translate\bin\64bit\stream-live-translate.dll`。
+> OBS **不会**扫描安装目录下的 `plugins\` 文件夹；如果要装进 OBS 安装目录，
+> dll 要放 `<OBS安装目录>\obs-plugins\64bit\`，data 目录要放 `<OBS安装目录>\data\obs-plugins\stream-live-translate\`（需要管理员权限，一般不推荐）。放好后重启 OBS。
 
 > macOS 首次使用若被 Gatekeeper 拦截，对解压出来的文件执行一次
 > `xattr -dr com.apple.quarantine stream-live-translate.plugin`。
