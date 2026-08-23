@@ -25,6 +25,13 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 
+# A relative WorkDir must be anchored at the repo root: CMake resolves a
+# relative LIBOBS_INCLUDE_DIR against the plugin source directory, not our
+# working directory, which would make obs-module.h unfindable.
+if (-not [System.IO.Path]::IsPathRooted($WorkDir)) {
+    $WorkDir = Join-Path $root $WorkDir
+}
+
 function Step([string]$msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
 
 # Version straight from Cargo.toml.
