@@ -21,7 +21,6 @@
 
 #include <obs-module.h>
 #include <media-io/audio-io.h>
-#include <util/threading.h>
 #include <util/platform.h>
 
 #include <stdio.h>
@@ -52,6 +51,22 @@ typedef int slt_sock_t;
 #define SLT_INGEST_PORT_DEFAULT 8788
 #define SLT_INGEST_RATE 16000
 #define SLT_RMS_GATE 0.0005f
+
+/* OBS's util/threading.h unconditionally includes <pthread.h> (OBS builds
+ * with pthreads on every platform), which breaks standalone MSVC builds of
+ * this plugin. We only need the os_event API, which libobs exports, so
+ * forward-declare it instead of including the header. */
+struct os_event_data;
+typedef struct os_event_data os_event_t;
+enum os_event_type {
+	OS_EVENT_TYPE_AUTO,
+	OS_EVENT_TYPE_MANUAL,
+};
+extern int os_event_init(os_event_t **event, enum os_event_type type);
+extern void os_event_destroy(os_event_t *event);
+extern int os_event_timedwait(os_event_t *event, unsigned long milliseconds);
+extern int os_event_try(os_event_t *event);
+extern int os_event_signal(os_event_t *event);
 
 /* OBS's util/threading.h does not expose a plain mutex type (only os_event /
  * os_sem), so wrap the native primitives directly. */
