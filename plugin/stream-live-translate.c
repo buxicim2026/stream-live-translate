@@ -53,6 +53,50 @@ typedef int slt_sock_t;
 #define SLT_INGEST_RATE 16000
 #define SLT_RMS_GATE 0.0005f
 
+/* OBS's util/threading.h does not expose a plain mutex type (only os_event /
+ * os_sem), so wrap the native primitives directly. */
+#ifdef _WIN32
+typedef CRITICAL_SECTION slt_mutex_t;
+#else
+typedef pthread_mutex_t slt_mutex_t;
+#endif
+
+static void slt_mutex_init(slt_mutex_t *m)
+{
+#ifdef _WIN32
+	InitializeCriticalSection(m);
+#else
+	pthread_mutex_init(m, NULL);
+#endif
+}
+
+static void slt_mutex_destroy(slt_mutex_t *m)
+{
+#ifdef _WIN32
+	DeleteCriticalSection(m);
+#else
+	pthread_mutex_destroy(m);
+#endif
+}
+
+static void slt_mutex_lock(slt_mutex_t *m)
+{
+#ifdef _WIN32
+	EnterCriticalSection(m);
+#else
+	pthread_mutex_lock(m);
+#endif
+}
+
+static void slt_mutex_unlock(slt_mutex_t *m)
+{
+#ifdef _WIN32
+	LeaveCriticalSection(m);
+#else
+	pthread_mutex_unlock(m);
+#endif
+}
+
 /* ---------------------------------------------------------------------- */
 /* Shared sender state                                                     */
 /* ---------------------------------------------------------------------- */
@@ -63,7 +107,7 @@ typedef int slt_sock_t;
 #define SLT_RING_BYTES (2 * 1024 * 1024)
 
 struct slt_sender {
-	os_mutex_t *mutex;
+	slt_mutex_t *mutex;
 	os_event_t *wake;
 	os_event_t *stop;
 	uint8_t *ring;
@@ -406,9 +450,9 @@ static void sender_loop(void)
 		/* Drain the ring buffer and stream it out. */
 		for (;;) {
 			size_t len;
-			os_mutex_lock(g_sender.mutex);
+			slt_mutex_lock(g_sender.mutex);
 			len = ring_pop(chunk, 16 * 1024);
-			os_mutex_unlock(g_sender.mutex);
+			slt_mutex_unlock(g_sender.mutex);
 			if (len == 0)
 				break;
 			/* Drop a stray trailing byte (should not happen). */
@@ -513,14 +557,14 @@ static void filter_update(void *data, obs_data_t *settings)
 	uint32_t port = (uint32_t)obs_data_get_int(settings, "port");
 	if (port != g_sender.port) {
 		g_sender.port = port;
-		os_mutex_lock(g_sender.mutex);
+		slt_mutex_lock(g_sender.mutex);
 		g_sender.head = g_sender.tail = g_sender.used = 0;
-		os_mutex_unlock(g_sender.mutex);
+		slt_mutex_unlock(g_sender.mutex);
 		g_sender.reconnect_requested = true;
 	}
 }
 
-static struct obs_audio_data *filter_audio(void *data, obs_source_t *source,
+static struct obs_audio_data *filter_audio(void *data,
 					   struct obs_audio_data *audio)
 {
 	struct slt_filter *f = data;
@@ -528,7 +572,11 @@ static struct obs_audio_data *filter_audio(void *data, obs_source_t *source,
 		return audio;
 
 	const uint32_t frames = audio->frames;
-	const size_t channels = get_audio_channels(audio->speakers);
+	/* struct obs_audio_data has no channel-layout field; derive the channel
+	 * count from the active audio output configuration instead. */
+	const struct audio_output_info *aoi =
+		audio_output_get_info(obs_get_audio());
+	const size_t channels = aoi ? get_audio_channels(aoi->speakers) : 0;
 	if (channels == 0 || channels > MAX_AV_PLANES)
 		return audio;
 
@@ -561,7 +609,7 @@ static struct obs_audio_data *filter_audio(void *data, obs_source_t *source,
 	if (!f->gate_silence || rms >= SLT_RMS_GATE) {
 		const uint32_t rate =
 			audio_output_get_sample_rate(obs_get_audio());
-		os_mutex_lock(g_sender.mutex);
+		slt_mutex_lock(g_sender.mutex);
 		if (rate != g_sender.in_rate) {
 			/* Sample rate changed: restart resampler state. */
 			g_sender.in_rate = rate ? rate : 48000;
@@ -569,7 +617,7 @@ static struct obs_audio_data *filter_audio(void *data, obs_source_t *source,
 			g_sender.head = g_sender.tail = g_sender.used = 0;
 		}
 		ring_push((const uint8_t *)mono, frames * sizeof(int16_t));
-		os_mutex_unlock(g_sender.mutex);
+		slt_mutex_unlock(g_sender.mutex);
 		os_event_signal(g_sender.wake);
 	}
 
@@ -611,7 +659,7 @@ bool obs_module_load(void)
 	g_sender.engine_pid = -1;
 #endif
 
-	os_mutex_init(&g_sender.mutex);
+	slt_mutex_init(&g_sender.mutex);
 	os_event_init(&g_sender.wake, OS_EVENT_TYPE_AUTO);
 	os_event_init(&g_sender.stop, OS_EVENT_TYPE_MANUAL);
 
@@ -626,7 +674,7 @@ bool obs_module_load(void)
 #endif
 
 	obs_register_source(&filter_info);
-	blog(LOG_INFO, "[SLT] Stream Live Translate plugin loaded (v0.7.0)");
+	blog(LOG_INFO, "[SLT] Stream Live Translate plugin loaded (v0.0.6.1)");
 	return true;
 }
 
@@ -647,7 +695,7 @@ void obs_module_unload(void)
 
 	os_event_destroy(g_sender.stop);
 	os_event_destroy(g_sender.wake);
-	os_mutex_destroy(g_sender.mutex);
+	slt_mutex_destroy(g_sender.mutex);
 	bfree(g_sender.ring);
 	g_sender.ring = NULL;
 

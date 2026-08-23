@@ -70,7 +70,7 @@ if (-not $obsDll) {
     Step "OBS install not found; downloading official OBS-Studio-$ObsVersion zip"
     $zip = Join-Path $WorkDir "obs-full.zip"
     if (-not (Test-Path $zip)) {
-        Invoke-WebRequest -Uri "https://github.com/obsproject/obs-studio/releases/download/$ObsVersion/OBS-Studio-$ObsVersion-Full-x64.zip" -OutFile $zip
+        Invoke-WebRequest -Uri "https://github.com/obsproject/obs-studio/releases/download/$ObsVersion/OBS-Studio-$ObsVersion-Windows.zip" -OutFile $zip
     }
     Expand-Archive -Path $zip -DestinationPath "$WorkDir\obs-full" -Force
     $obsDll = (Get-ChildItem "$WorkDir\obs-full" -Recurse -Filter obs.dll |

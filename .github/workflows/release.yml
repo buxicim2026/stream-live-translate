@@ -25,12 +25,6 @@ jobs:
             container: ubuntu:20.04
             out: linux-x64
             archive: tar.gz
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-22.04
-            container: ubuntu:20.04
-            out: linux-arm64
-            archive: tar.gz
-            cross: true
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             out: windows-x64
@@ -66,29 +60,7 @@ jobs:
         run: |
           export DEBIAN_FRONTEND=noninteractive
           apt-get update
-          apt-get install -y --no-install-recommends libasound2-dev
-
-      - name: Install Linux ARM64 cross toolchain
-        if: matrix.cross
-        shell: bash
-        run: |
-          export DEBIAN_FRONTEND=noninteractive
-          dpkg --add-architecture arm64
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            gcc-aarch64-linux-gnu \
-            libc6-dev-arm64-cross \
-            libasound2-dev:arm64
-
-      - name: Configure Linux ARM64 linker
-        if: matrix.cross
-        shell: bash
-        run: |
-          mkdir -p .cargo
-          cat > .cargo/config.toml <<'EOF'
-          [target.aarch64-unknown-linux-gnu]
-          linker = "aarch64-linux-gnu-gcc"
-          EOF
+          apt-get install -y --no-install-recommends libasound2-dev libssl-dev
 
       - name: Cargo check (faster error feedback)
         shell: bash
@@ -115,8 +87,7 @@ jobs:
           cp "$binary" "$out/"
           chmod +x "$out/stream-live-translate${ext}"
 
-          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ] || \
-             [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
             printf '%s\n' \
               "stream-live-translate - single-file build" \
               "" \
@@ -135,7 +106,12 @@ jobs:
           cd release
           archive_file="${{ matrix.out }}.${{ matrix.archive }}"
           if [ "${{ matrix.archive }}" = "zip" ]; then
-            (cd "${{ matrix.out }}" && zip -r "../$archive_file" . >/dev/null)
+            if command -v zip >/dev/null 2>&1; then
+              (cd "${{ matrix.out }}" && zip -r "../$archive_file" . >/dev/null)
+            else
+              # Windows Git Bash ships no zip(1); fall back to PowerShell.
+              powershell.exe -NoProfile -Command "Compress-Archive -Path '${{ matrix.out }}/*' -DestinationPath '$archive_file' -Force"
+            fi
           else
             tar -czf "$archive_file" "${{ matrix.out }}"
           fi

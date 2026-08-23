@@ -1,0 +1,7 @@
+# Shell scripts must stay LF: they run on Linux/macOS runners where a
+# trailing CR ("set -euo pipefail\r") makes bash bail with exit code 2.
+*.sh text eol=lf
+*.bash text eol=lf
+
+# Everything else follows the platform default (autocrlf on Windows).
+* text=auto
