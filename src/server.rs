@@ -58,28 +58,21 @@ fn build_router(state: Arc<AppState>, static_dir: PathBuf) -> Router {
         .route("/restart", post(restart_pipeline))
         .with_state(state.clone());
 
-    // Disk directories for the live-reload case. If the user has a `dist/`
-    // next to the binary we serve from there (so they can edit HTML/JS/CSS
-    // and refresh). Otherwise the static-file handlers fall back to the
-    // assets embedded at compile time, so the binary is fully self-contained.
-    let admin_dir = static_dir.join("admin");
-    let overlay_dir = static_dir.join("overlay");
+    // Disk directory for the optional bundled binaries (live-reload case).
     let bin_dir = static_dir.join("bin");
 
+    // Panel/overlay static assets. The binary is self-contained: assets are
+    // embedded at compile time. (We intentionally do NOT use ServeDir here:
+    // pointing it at a nonexistent directory makes every request 404 without
+    // ever reaching the fallback handler.)
     Router::new()
         .route("/", get(root_handler))
         .route("/admin", get(admin_handler))
         .route("/overlay", get(overlay_handler))
         .route("/ws/subtitles", get(ws_subtitles))
+        .route("/admin-assets/*asset", get(embedded_admin_asset))
+        .route("/overlay-assets/*asset", get(embedded_overlay_asset))
         .nest("/api", api)
-        .nest_service(
-            "/admin-assets",
-            ServeDir::new(admin_dir).fallback(axum::routing::get(embedded_admin_asset)),
-        )
-        .nest_service(
-            "/overlay-assets",
-            ServeDir::new(overlay_dir).fallback(axum::routing::get(embedded_overlay_asset)),
-        )
         .nest_service("/bin", ServeDir::new(bin_dir))
         // axum 0.7 catch-all syntax is /*path (must be the final segment).
         .route("/_assets/*path", get(embedded_any_asset))
@@ -222,7 +215,7 @@ async fn post_config(
         )
             .into_response();
     }
-    if let Err(e) = cfg.save(&config_path()) {
+    if let Err(e) = cfg.save(&crate::config_path()) {
         warn!(error = %e, "save config");
     }
     *state.config.write() = cfg;
@@ -278,6 +271,9 @@ struct StatusView {
     last_subtitle_at: Option<chrono::DateTime<chrono::Utc>>,
     bind_url: String,
     obs_dock_url: Option<String>,
+    /// Where the config is persisted; shown in the admin panel so users can
+    /// verify their settings were actually saved.
+    config_path: String,
 }
 
 async fn get_status(State(state): State<Arc<AppState>>) -> Response {
@@ -296,6 +292,7 @@ async fn get_status(State(state): State<Arc<AppState>>) -> Response {
         } else {
             None
         },
+        config_path: crate::config_path().display().to_string(),
     };
     axum::Json(view).into_response()
 }
@@ -383,20 +380,4 @@ async fn ws_loop(mut socket: WebSocket, state: Arc<AppState>) {
             }
         }
     }
-}
-
-fn config_path() -> std::path::PathBuf {
-    if let Some(p) = std::env::var_os("SLT_CONFIG") {
-        return std::path::PathBuf::from(p);
-    }
-    let local = std::path::PathBuf::from("config.toml");
-    if local.exists() {
-        return local;
-    }
-    if let Some(mut dir) = dirs::config_dir() {
-        dir.push("stream-live-translate");
-        dir.push("config.toml");
-        return dir;
-    }
-    local
 }

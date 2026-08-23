@@ -277,6 +277,7 @@ pub mod openai {
             let endpoint = cfg
                 .endpoint
                 .clone()
+                .filter(|s| !s.trim().is_empty())
                 .unwrap_or_else(|| DEFAULT_ENDPOINT.to_string());
             if cfg.api_key.is_empty() {
                 return Err(anyhow!("OpenAI API key is empty"));

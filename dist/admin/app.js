@@ -15,11 +15,23 @@
 
   let currentConfig = null;
   let pendingPartial = "";
+  let toastTimer = null;
+
+  // Big, unmissable feedback for save/test actions.
+  function toast(msg, kind) {
+    const el = $("toast");
+    el.textContent = msg;
+    el.className = "toast show " + (kind || "info");
+    el.hidden = false;
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { el.hidden = true; }, 3500);
+  }
 
   function fillForm(cfg) {
     $("provider").value = cfg.llm.provider;
     $("model").value = cfg.llm.model;
     $("api_key").value = cfg.llm.api_key;
+    $("endpoint").value = cfg.llm.endpoint || "";
     $("target_lang").value = cfg.llm.target_lang;
     $("translate_chinese").checked = cfg.llm.translate_chinese;
     $("audio-mode").value = cfg.audio.mode;
@@ -56,6 +68,7 @@
         provider: $("provider").value,
         model: $("model").value,
         api_key: $("api_key").value,
+        endpoint: $("endpoint").value.trim() || null,
         target_lang: $("target_lang").value,
         translate_chinese: $("translate_chinese").checked,
       },
@@ -124,6 +137,23 @@
       set("dot-audio", s.audio_active, false);
       set("dot-llm", s.llm_connected, s.running && !s.last_error ? true : false);
       set("dot-obs", s.obs_connected, false);
+      // Surface the engine's last error + where the config is persisted, so
+      // users can tell whether saving actually took effect.
+      const errEl = $("engine-error");
+      errEl.classList.remove("good");
+      if (s.last_error) {
+        errEl.textContent = "❗ " + s.last_error;
+        errEl.hidden = false;
+      } else if (s.running) {
+        errEl.textContent = "✅ 管线运行中";
+        errEl.hidden = false;
+        errEl.classList.add("good");
+      } else {
+        errEl.hidden = true;
+      }
+      if (s.config_path) {
+        $("config-path").textContent = "配置文件：" + s.config_path;
+      }
     } catch (e) {
       console.warn("load status failed", e);
     }
@@ -168,14 +198,39 @@
   // Wire up events.
   $("save-btn").addEventListener("click", async () => {
     const patch = collectPatch();
-    const r = await fetch("/api/config", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(patch),
-    });
-    $("save-status").textContent = r.ok ? "已保存" : "保存失败";
-    setTimeout(() => { $("save-status").textContent = ""; }, 2000);
-    await loadConfig();
+    const btn = $("save-btn");
+    btn.disabled = true;
+    btn.textContent = "保存中…";
+    try {
+      const r = await fetch("/api/config", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!r.ok) {
+        let msg = "HTTP " + r.status;
+        try { msg = (await r.json()).error || msg; } catch {}
+        toast("保存失败：" + msg, "error");
+        return;
+      }
+      // Verify the value really landed in the persisted config.
+      await loadConfig();
+      const saved = currentConfig && currentConfig.llm.api_key === patch.llm.api_key
+        && currentConfig.llm.model === patch.llm.model;
+      if (saved) {
+        toast("✅ 配置已保存并生效（管线已重启）", "ok");
+      } else {
+        toast("⚠️ 已保存，但读回内容不一致，请检查配置文件权限", "error");
+      }
+      // Restart the pipeline so the new key/model/endpoint are used.
+      await fetch("/api/restart", { method: "POST" });
+      setTimeout(loadStatus, 800);
+    } catch (e) {
+      toast("保存失败：" + e, "error");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "保存配置";
+    }
   });
 
   $("restart-btn").addEventListener("click", async () => {

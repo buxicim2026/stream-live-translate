@@ -40,6 +40,11 @@
       <label>API Key
         <input id="api_key" type="password" placeholder="sk-..." />
       </label>
+      <label>Base URL（接口地址）
+        <input id="endpoint" type="text" placeholder="留空使用内置默认地址" />
+      </label>
+      <p class="hint field-hint">Qwen 默认 <code>wss://dashscope.aliyuncs.com/api-ws/v1/realtime</code>；
+        若你的 Key 属于百炼业务空间，请填专属域名，例如 <code>wss://你的WorkspaceId.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime</code>。</p>
       <label>翻译目标语言
         <input id="target_lang" type="text" value="zh" />
       </label>
@@ -132,6 +137,8 @@
         <button id="clear-btn" class="ghost">清空字幕</button>
         <span id="save-status" class="status"></span>
       </div>
+      <div id="engine-error" class="engine-error" hidden></div>
+      <div id="config-path" class="config-path"></div>
     </section>
 
     <section class="card wide">
@@ -141,5 +148,6 @@
   </main>
 
   <script src="/admin-assets/app.js"></script>
+  <div id="toast" class="toast" hidden></div>
 </body>
 </html>
