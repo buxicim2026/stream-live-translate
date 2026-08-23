@@ -27,6 +27,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <time.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -39,6 +40,7 @@ typedef SOCKET slt_sock_t;
 #include <signal.h>
 #include <errno.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -290,19 +292,52 @@ static void engine_spawn(void)
 	snprintf(cmdline, sizeof(cmdline), "\"%s\" --audio-mode obs_filter",
 		 exe_copy);
 
+	/* Run the engine from its own directory and capture its console
+	 * output into engine.log next to the binary: the engine has no
+	 * console window, so without this a startup crash would be
+	 * completely silent. */
+	char exedir[1024];
+	snprintf(exedir, sizeof(exedir), "%s", exe_copy);
+	char *sl = strrchr(exedir, '\\');
+	if (!sl)
+		sl = strrchr(exedir, '/');
+	if (sl)
+		*sl = '\0';
+
+	char logpath[1200];
+	snprintf(logpath, sizeof(logpath), "%s\\engine.log", exedir);
+
+	SECURITY_ATTRIBUTES sa;
+	memset(&sa, 0, sizeof(sa));
+	sa.nLength = sizeof(sa);
+	sa.bInheritHandle = TRUE;
+	HANDLE logfile = CreateFileA(logpath, GENERIC_WRITE, FILE_SHARE_READ,
+				     &sa, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL,
+				     NULL);
+
 	STARTUPINFOA si;
 	PROCESS_INFORMATION pi;
 	memset(&si, 0, sizeof(si));
 	si.cb = sizeof(si);
 	memset(&pi, 0, sizeof(pi));
+	if (logfile != INVALID_HANDLE_VALUE) {
+		si.dwFlags = STARTF_USESTDHANDLES;
+		si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+		si.hStdOutput = logfile;
+		si.hStdError = logfile;
+	}
 
-	if (!CreateProcessA(NULL, cmdline, NULL, NULL, FALSE,
-			    CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+	if (!CreateProcessA(NULL, cmdline, NULL, NULL, TRUE, CREATE_NO_WINDOW,
+			    NULL, exedir, &si, &pi)) {
 		blog(LOG_WARNING, "[SLT] failed to spawn engine (err %lu)",
 		     GetLastError());
+		if (logfile != INVALID_HANDLE_VALUE)
+			CloseHandle(logfile);
 		bfree((void *)exe);
 		return;
 	}
+	if (logfile != INVALID_HANDLE_VALUE)
+		CloseHandle(logfile);
 	CloseHandle(pi.hThread);
 	g_sender.engine_proc = pi.hProcess;
 
@@ -359,6 +394,54 @@ static void engine_terminate(void)
 		g_sender.engine_pid = -1;
 	}
 #endif
+}
+
+static bool engine_alive(void)
+{
+#ifdef _WIN32
+	if (!g_sender.engine_proc)
+		return false;
+	return WaitForSingleObject(g_sender.engine_proc, 0) == WAIT_TIMEOUT;
+#else
+	if (g_sender.engine_pid <= 0)
+		return false;
+	int st;
+	pid_t r = waitpid(g_sender.engine_pid, &st, WNOHANG);
+	if (r == 0)
+		return true; /* still running */
+	g_sender.engine_pid = -1; /* exited and reaped */
+	return false;
+#endif
+}
+
+/* Called periodically from the sender thread: if the engine died (e.g.
+ * crashed at startup), respawn it instead of silently streaming nowhere. */
+static void engine_ensure_running(void)
+{
+#ifdef _WIN32
+	static DWORD last_try = 0;
+	DWORD now = GetTickCount();
+#else
+	static time_t last_try = 0;
+	time_t now = time(NULL);
+#endif
+	if (engine_alive())
+		return;
+#ifdef _WIN32
+	if (now - last_try < 10000)
+		return;
+	last_try = now;
+	if (g_sender.engine_proc) {
+		CloseHandle(g_sender.engine_proc);
+		g_sender.engine_proc = NULL;
+	}
+#else
+	if (now - last_try < 10)
+		return;
+	last_try = now;
+#endif
+	blog(LOG_WARNING, "[SLT] engine is not running; (re)spawning it");
+	engine_spawn();
 }
 
 /* ---------------------------------------------------------------------- */
@@ -423,6 +506,8 @@ static void sender_loop(void)
 	for (;;) {
 		if (os_event_try(g_sender.stop) == 0)
 			break;
+
+		engine_ensure_running();
 
 		/* Filter settings asked for a reconnect (port change). */
 		if (g_sender.reconnect_requested &&

@@ -79,7 +79,8 @@ fn build_router(state: Arc<AppState>, static_dir: PathBuf) -> Router {
             ServeDir::new(overlay_dir).fallback(axum::routing::get(embedded_overlay_asset)),
         )
         .nest_service("/bin", ServeDir::new(bin_dir))
-        .route("/_assets/{*path}", get(embedded_any_asset))
+        // axum 0.7 catch-all syntax is /*path (must be the final segment).
+        .route("/_assets/*path", get(embedded_any_asset))
         .layer(CorsLayer::permissive())
         .layer(SetResponseHeaderLayer::if_not_present(
             header::CACHE_CONTROL,

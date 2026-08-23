@@ -26,6 +26,12 @@ panic = "abort"
 incremental = false
 # Compress embedded assets at build time so a single binary stays under ~10MB.
 debug = 0
+# MSVC builds must not depend on VCRUNTIME140.dll: the engine is spawned by
+# the OBS plugin and the OBS install dir is NOT in its DLL search path, so a
+# missing VC++ redistributable would make it exit silently on startup.
+
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
 
 [profile.release-windows]
 inherits = "release"
