@@ -47,15 +47,16 @@ pub async fn serve(state: Arc<AppState>, cfg: ServerConfig) -> Result<()> {
 }
 
 fn build_router(state: Arc<AppState>, static_dir: PathBuf) -> Router {
+    // NOTE: these routes are nested under /api below, so the paths here
+    // must NOT repeat the /api prefix.
     let api = Router::new()
-        .route("/api/config", get(get_config).post(post_config))
-        .route("/api/devices", get(get_devices))
-        .route("/api/status", get(get_status))
-        .route("/api/subtitles", get(get_subtitles))
-        .route("/api/subtitles/clear", post(clear_subtitles))
-        .route("/api/restart", post(restart_pipeline))
-        .route("/ws/subtitles", get(ws_subtitles))
-        .with_state(state);
+        .route("/config", get(get_config).post(post_config))
+        .route("/devices", get(get_devices))
+        .route("/status", get(get_status))
+        .route("/subtitles", get(get_subtitles))
+        .route("/subtitles/clear", post(clear_subtitles))
+        .route("/restart", post(restart_pipeline))
+        .with_state(state.clone());
 
     // Disk directories for the live-reload case. If the user has a `dist/`
     // next to the binary we serve from there (so they can edit HTML/JS/CSS
@@ -69,6 +70,7 @@ fn build_router(state: Arc<AppState>, static_dir: PathBuf) -> Router {
         .route("/", get(root_handler))
         .route("/admin", get(admin_handler))
         .route("/overlay", get(overlay_handler))
+        .route("/ws/subtitles", get(ws_subtitles))
         .nest("/api", api)
         .nest_service(
             "/admin-assets",
@@ -81,6 +83,7 @@ fn build_router(state: Arc<AppState>, static_dir: PathBuf) -> Router {
         .nest_service("/bin", ServeDir::new(bin_dir))
         // axum 0.7 catch-all syntax is /*path (must be the final segment).
         .route("/_assets/*path", get(embedded_any_asset))
+        .with_state(state)
         .layer(CorsLayer::permissive())
         .layer(SetResponseHeaderLayer::if_not_present(
             header::CACHE_CONTROL,
