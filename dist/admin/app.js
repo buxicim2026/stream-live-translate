@@ -34,7 +34,16 @@
     $("endpoint").value = cfg.llm.endpoint || "";
     $("target_lang").value = cfg.llm.target_lang;
     $("translate_chinese").checked = cfg.llm.translate_chinese;
-    $("audio-mode").value = cfg.audio.mode;
+    // Defensive: if the config's mode isn't among the options (old cached
+    // page), add it so saving can never silently switch the mode.
+    const modeSel = $("audio-mode");
+    if (![...modeSel.options].some((o) => o.value === cfg.audio.mode)) {
+      const opt = document.createElement("option");
+      opt.value = cfg.audio.mode;
+      opt.textContent = cfg.audio.mode;
+      modeSel.appendChild(opt);
+    }
+    modeSel.value = cfg.audio.mode;
     $("use_sck").checked = cfg.audio.use_screen_capture_kit;
     $("obs-auto").checked = cfg.obs.auto_connect;
     $("obs-host").value = cfg.obs.host;
@@ -153,6 +162,17 @@
       }
       if (s.config_path) {
         $("config-path").textContent = "配置文件：" + s.config_path;
+      }
+      // Plugin mode locks the audio mode selector (engine launched with
+      // --audio-mode obs_filter); the backend enforces it too.
+      const modeSel = $("audio-mode");
+      const lock = $("audio-mode-lock");
+      if (s.audio_mode_forced) {
+        modeSel.disabled = true;
+        lock.hidden = false;
+      } else {
+        modeSel.disabled = false;
+        lock.hidden = true;
       }
     } catch (e) {
       console.warn("load status failed", e);

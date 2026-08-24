@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <title>Stream Live Translate · 控制台</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <link rel="stylesheet" href="/admin-assets/style.css" />
+  <link rel="stylesheet" href="/admin-assets/style.css?v=0.0.6.2" />
 </head>
 <body>
   <header class="topbar">
@@ -57,10 +57,12 @@
       <p class="hint">系统音频环回 = 抓取 OBS 当前听到的声音；麦克风 = 抓指定输入设备。</p>
       <label>模式
         <select id="audio-mode">
-          <option value="system">系统音频环回（推荐）</option>
+          <option value="obs_filter">OBS 插件送音（插件模式下自动使用，请勿更改）</option>
+          <option value="system">系统音频环回（独立运行时）</option>
           <option value="device">指定输入/输出设备</option>
         </select>
       </label>
+      <p class="hint" id="audio-mode-lock" hidden>🔒 引擎由 OBS 插件启动，音频由插件直接送入，模式已锁定。</p>
       <label>设备
         <select id="audio-device"></select>
       </label>
@@ -145,7 +147,7 @@
     </section>
   </main>
 
-  <script src="/admin-assets/app.js"></script>
+  <script src="/admin-assets/app.js?v=0.0.6.2"></script>
   <div id="toast" class="toast" hidden></div>
 </body>
 </html>

@@ -143,6 +143,7 @@ async fn try_connect(
     let d = hello.get("d").cloned().unwrap_or_default();
     let rpc_version = d.get("rpcVersion").and_then(|v| v.as_i64()).unwrap_or(1) as u32;
     let auth = d.get("authentication").cloned();
+    let auth_required = auth.is_some();
 
     let identify_d = if let Some(auth) = auth {
         let challenge = auth
@@ -172,7 +173,15 @@ async fn try_connect(
     ))
     .await?;
 
-    let identified = read_json(&mut ws).await?;
+    let identified = read_json(&mut ws).await.map_err(|e| {
+        if auth_required {
+            anyhow!(
+                "OBS 拒绝了认证（通常是 OBS WebSocket 密码不匹配：请在 工具 → WebSocket 服务器设置 中核对，或取消勾选“启用身份验证”）: {e}"
+            )
+        } else {
+            anyhow!("OBS closed during handshake: {e}")
+        }
+    })?;
     if identified.get("op").and_then(|v| v.as_i64()) != Some(2) {
         return Err(anyhow!("OBS did not confirm identify"));
     }

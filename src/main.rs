@@ -59,6 +59,11 @@ pub struct AppState {
     pub status: Arc<RwLock<AppStatus>>,
     pub obs_cmd_tx:
         parking_lot::Mutex<Option<tokio::sync::mpsc::Sender<crate::obs::ObsCommand>>>,
+    /// Audio mode forced via `--audio-mode` (the OBS plugin passes
+    /// `obs_filter`). While set, admin-panel config patches can never
+    /// change `audio.mode`, so saving other settings can't break the
+    /// audio feed.
+    pub forced_audio_mode: Option<String>,
 }
 
 #[derive(Default, Clone, Debug)]
@@ -157,6 +162,7 @@ async fn main() -> Result<()> {
         pipeline: pipeline.clone(),
         status: status.clone(),
         obs_cmd_tx: parking_lot::Mutex::new(None),
+        forced_audio_mode: cli.audio_mode.clone(),
     });
 
     pipeline::spawn(state.clone(), cfg_path.clone());

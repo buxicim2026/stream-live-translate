@@ -215,8 +215,30 @@ async fn post_config(
         )
             .into_response();
     }
+    // The OBS plugin launches the engine with --audio-mode obs_filter;
+    // the audio feed comes from the plugin itself. Never let a panel
+    // save silently switch the mode (that kills the pipeline).
+    if let Some(forced) = &state.forced_audio_mode {
+        if cfg.audio.mode != *forced {
+            info!(
+                from = %cfg.audio.mode,
+                to = %forced,
+                "audio mode locked by CLI override; ignoring patch value"
+            );
+            cfg.audio.mode = forced.clone();
+        }
+    }
     if let Err(e) = cfg.save(&crate::config_path()) {
+        // Do NOT pretend success: the admin panel must surface disk-write
+        // failures, otherwise users believe their settings were persisted.
         warn!(error = %e, "save config");
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            axum::Json(serde_json::json!({
+                "error": format!("config saved to memory but FAILED to write {}: {e}", crate::config_path().display())
+            })),
+        )
+            .into_response();
     }
     *state.config.write() = cfg;
     (
@@ -277,6 +299,9 @@ struct StatusView {
     /// Where the config is persisted; shown in the admin panel so users can
     /// verify their settings were actually saved.
     config_path: String,
+    /// Set when the engine was launched with --audio-mode (plugin mode);
+    /// the panel then locks the audio mode selector.
+    audio_mode_forced: Option<String>,
 }
 
 async fn get_status(State(state): State<Arc<AppState>>) -> Response {
@@ -297,6 +322,7 @@ async fn get_status(State(state): State<Arc<AppState>>) -> Response {
             None
         },
         config_path: crate::config_path().display().to_string(),
+        audio_mode_forced: state.forced_audio_mode.clone(),
     };
     axum::Json(view).into_response()
 }
