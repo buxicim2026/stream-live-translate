@@ -38,6 +38,17 @@ struct PipelineInner {
     _audio_task: tokio::task::JoinHandle<()>,
 }
 
+impl Drop for PipelineInner {
+    fn drop(&mut self) {
+        // Dropping a JoinHandle only detaches the task; without abort() the
+        // old LLM/audio tasks (and the open WebSocket session) would leak
+        // and keep running across restarts.
+        self._llm_task.abort();
+        self._audio_task.abort();
+        self._vad_task.abort();
+    }
+}
+
 impl PipelineHandle {
     pub fn new() -> Self {
         let (shutdown, shutdown_rx) = tokio::sync::watch::channel(false);
@@ -52,12 +63,21 @@ impl PipelineHandle {
         self.inner.lock().is_some()
     }
 
-    pub async fn shutdown(&self) {
-        let _ = self.shutdown.send(true);
+    /// Stop the current run; the outer run-loop immediately starts a new
+    /// pipeline with the (possibly updated) config. Used by /api/restart
+    /// and by the config-change watcher.
+    pub async fn restart(&self) {
         let mut guard = self.inner.lock();
         if let Some(inner) = guard.take() {
             drop(inner);
         }
+    }
+
+    /// Permanent shutdown (process exit). The outer run-loop sees the
+    /// shutdown flag and terminates for good.
+    pub async fn shutdown(&self) {
+        let _ = self.shutdown.send(true);
+        self.restart().await;
     }
 }
 
@@ -83,6 +103,9 @@ async fn run(
         match result {
             Ok(()) => {
                 info!("pipeline started cleanly");
+                // Clear any stale error from a previous failed attempt so
+                // the admin panel shows a healthy state.
+                state.status.write().last_error = None;
                 backoff = Duration::from_secs(2);
             }
             Err(e) => {
@@ -124,7 +147,7 @@ async fn watch(state: &Arc<AppState>, handle: &Arc<PipelineHandle>) {
             last_provider = cur.llm.provider.clone();
             last_audio_mode = cur.audio.mode.clone();
             last_device = cur.audio.device.clone();
-            handle.shutdown().await;
+            handle.restart().await;
             tokio::time::sleep(Duration::from_millis(250)).await;
             return;
         }

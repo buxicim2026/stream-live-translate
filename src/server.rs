@@ -268,6 +268,9 @@ struct StatusView {
     llm_connected: bool,
     obs_connected: bool,
     last_error: Option<String>,
+    /// Why the OBS WebSocket is not connected (e.g. OBS not running or
+    /// the WebSocket server not enabled / wrong password).
+    obs_error: Option<String>,
     last_subtitle_at: Option<chrono::DateTime<chrono::Utc>>,
     bind_url: String,
     obs_dock_url: Option<String>,
@@ -285,6 +288,7 @@ async fn get_status(State(state): State<Arc<AppState>>) -> Response {
         llm_connected: s.llm_connected,
         obs_connected: s.obs_connected,
         last_error: s.last_error,
+        obs_error: s.obs_error,
         last_subtitle_at: s.last_subtitle_at,
         bind_url: format!("http://{}:{}", cfg.server.host, cfg.server.port),
         obs_dock_url: if cfg.obs.register_dock {
@@ -317,8 +321,10 @@ async fn clear_subtitles(State(state): State<Arc<AppState>>) -> Response {
 }
 
 async fn restart_pipeline(State(state): State<Arc<AppState>>) -> Response {
-    state.pipeline.shutdown().await;
-    // The pipeline's outer run() loop will spin a new try_start().
+    // restart() (NOT shutdown()): the pipeline run-loop must stay alive and
+    // spin up a fresh pipeline with the current config. shutdown() is
+    // permanent and reserved for process exit.
+    state.pipeline.restart().await;
     axum::Json(serde_json::json!({"ok": true})).into_response()
 }
 

@@ -114,6 +114,7 @@ async fn run_loop(state: Arc<AppState>, client: Arc<Mutex<ObsClient>>) {
             {
                 let mut s = state.status.write();
                 s.obs_connected = false;
+                s.obs_error = Some(e.to_string());
             }
             client.lock().status.lock().connected = false;
             client.lock().status.lock().last_error = Some(e.to_string());
@@ -180,6 +181,7 @@ async fn try_connect(
     {
         let mut s = state.status.write();
         s.obs_connected = true;
+        s.obs_error = None;
     }
     {
         let c = client.lock();

@@ -47,19 +47,6 @@
     $("ov-animation").value = cfg.overlay.animation;
     $("obs-dock-url").textContent =
       `${location.protocol}//${location.host}/admin?obsDock=1`;
-    const bindUrl = `${location.protocol}//${location.host}/overlay` +
-      `#size=${cfg.overlay.font_size}&color=${encodeURIComponent(cfg.overlay.font_color)}` +
-      `&bg=${encodeURIComponent(cfg.overlay.background_color + hexAlpha(cfg.overlay.background_opacity))}` +
-      `&position=${cfg.overlay.position}&animation=${cfg.overlay.animation}`;
-    $("bind-url").href = bindUrl;
-    $("bind-url").textContent = "打开 /overlay";
-    $("overlay-url").href = bindUrl;
-    $("overlay-url").textContent = "/overlay";
-  }
-
-  function hexAlpha(a) {
-    const n = Math.max(0, Math.min(1, a));
-    return Math.round(n * 255).toString(16).padStart(2, "0");
   }
 
   function collectPatch() {
@@ -137,12 +124,25 @@
       set("dot-audio", s.audio_active, false);
       set("dot-llm", s.llm_connected, s.running && !s.last_error ? true : false);
       set("dot-obs", s.obs_connected, false);
+      // Prominent "is it actually running?" indicator in the top bar.
+      const run = $("run-state");
+      if (s.running) {
+        run.textContent = "● 管线运行中";
+        run.className = "run-state ok";
+      } else {
+        run.textContent = "● 管线未运行";
+        run.className = "run-state bad";
+      }
       // Surface the engine's last error + where the config is persisted, so
       // users can tell whether saving actually took effect.
       const errEl = $("engine-error");
       errEl.classList.remove("good");
       if (s.last_error) {
         errEl.textContent = "❗ " + s.last_error;
+        errEl.hidden = false;
+      } else if (!s.obs_connected && s.obs_error) {
+        errEl.textContent = "⚠️ OBS 未连接：" + s.obs_error +
+          "（请确认 OBS 已启动，且 工具 → WebSocket 服务器设置 已开启）";
         errEl.hidden = false;
       } else if (s.running) {
         errEl.textContent = "✅ 管线运行中";

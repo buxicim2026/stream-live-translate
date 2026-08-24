@@ -67,6 +67,9 @@ pub struct AppStatus {
     pub llm_connected: bool,
     pub obs_connected: bool,
     pub last_error: Option<String>,
+    /// Latest OBS WebSocket connection failure (surfaced in the admin
+    /// panel so users know why the OBS dot is red).
+    pub obs_error: Option<String>,
     pub last_subtitle_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 

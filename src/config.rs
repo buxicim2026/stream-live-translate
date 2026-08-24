@@ -25,6 +25,9 @@ pub struct ServerConfig {
     pub host: String,
     pub port: u16,
     /// Path to the bundled `overlay/` and `admin/` static assets.
+    /// Defaults are fine: main() overrides this with the real exe-relative
+    /// path at startup; the field only needs to deserialize.
+    #[serde(default = "default_static_dir")]
     pub static_dir: PathBuf,
 }
 
@@ -50,6 +53,10 @@ fn default_ingest_port() -> u16 {
     8788
 }
 
+fn default_static_dir() -> PathBuf {
+    PathBuf::from("dist")
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioConfig {
     /// `"system"` (loopback), `"device"` (input mic / specific output) or
@@ -72,6 +79,7 @@ pub struct AudioConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct FilterConfig {
     /// RMS threshold (0.0–1.0) below which we treat the segment as silence.
     pub silence_rms: f32,
@@ -81,6 +89,17 @@ pub struct FilterConfig {
     pub min_segment_ms: u32,
     /// Maximum segment duration in ms; we flush at this point even if no VAD end.
     pub max_segment_ms: u32,
+}
+
+impl Default for FilterConfig {
+    fn default() -> Self {
+        Self {
+            silence_rms: 0.012,
+            music_spectral_flatness: 0.55,
+            min_segment_ms: 350,
+            max_segment_ms: 8_000,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
