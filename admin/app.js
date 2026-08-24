@@ -249,7 +249,8 @@
         toast("保存失败：" + msg, "error");
         return;
       }
-      // Verify the value really landed in the persisted config.
+      // Verify the value is live in the engine. Disk persistence is
+      // verified server-side (write-verify); a failure there returns 500.
       await loadConfig();
       const saved = currentConfig && currentConfig.llm.api_key === patch.llm.api_key
         && currentConfig.llm.model === patch.llm.model;

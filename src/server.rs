@@ -240,6 +240,28 @@ async fn post_config(
         )
             .into_response();
     }
+    // Write-verify: even a successful write can be silently reverted by
+    // security/sync software, or land in a redirected location. Read the
+    // file back and compare the critical fields so the panel can warn the
+    // user that the value will NOT survive an OBS restart.
+    let verified = std::fs::read_to_string(crate::config_path())
+        .ok()
+        .and_then(|raw| toml::from_str::<crate::config::Config>(&raw).ok())
+        .map(|disk| disk.llm.api_key == cfg.llm.api_key && disk.llm.model == cfg.llm.model)
+        .unwrap_or(false);
+    if !verified {
+        warn!(path = %crate::config_path().display(), "config write verification FAILED: disk content differs from what was just saved");
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            axum::Json(serde_json::json!({
+                "error": format!(
+                    "配置已在内存中生效，但磁盘校验失败：{} 里的内容不是刚保存的值（可能被安全/同步软件拦截或回滚）。本次运行期间有效，重启 OBS 后会丢失，请检查该文件的读写权限与占用情况。",
+                    crate::config_path().display()
+                )
+            })),
+        )
+            .into_response();
+    }
     *state.config.write() = cfg;
     (
         StatusCode::OK,
@@ -391,8 +413,16 @@ async fn ws_loop(mut socket: WebSocket, state: Arc<AppState>) {
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(_) => return,
                 };
-                let payload = serde_json::to_string(&ev).unwrap_or_default();
-                if socket.send(Message::Text(payload.into())).await.is_err() {
+                // Serialize by hand (see subtitle::ws_payload): serde_json
+                // cannot serialize the tagged enum directly, and the old
+                // `to_string(&ev).unwrap_or_default()` silently shipped an
+                // empty message, so overlay/admin never got any text.
+                let payload = crate::subtitle::ws_payload(&ev);
+                if socket
+                    .send(Message::Text(payload.to_string().into()))
+                    .await
+                    .is_err()
+                {
                     return;
                 }
             }

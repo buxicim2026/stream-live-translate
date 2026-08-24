@@ -158,7 +158,8 @@ async fn watch(state: &Arc<AppState>, handle: &Arc<PipelineHandle>) {
 
 async fn try_start(state: &Arc<AppState>, handle: &Arc<PipelineHandle>) -> Result<()> {
     let cfg = state.config.read().clone();
-    if cfg.llm.api_key.is_empty() {
+    // The mock provider needs no credentials; require a key for real ones.
+    if cfg.llm.api_key.is_empty() && cfg.llm.provider != "mock" {
         anyhow::bail!("API key not set; configure it in the admin panel first");
     }
 

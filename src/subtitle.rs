@@ -160,6 +160,18 @@ impl SubtitleHub {
     }
 }
 
+/// Wire format for `/ws/subtitles` clients (overlay + admin preview).
+/// Must be built by hand: serde_json refuses internally-tagged newtype
+/// variants that hold a plain String ("cannot serialize tagged newtype
+/// variant ... containing a string").
+pub fn ws_payload(ev: &SubtitleEvent) -> serde_json::Value {
+    match ev {
+        SubtitleEvent::Partial(text) => serde_json::json!({"type": "partial", "text": text}),
+        SubtitleEvent::Final(text) => serde_json::json!({"type": "final", "text": text}),
+        SubtitleEvent::Cleared => serde_json::json!({"type": "cleared"}),
+    }
+}
+
 fn detect_lang(text: &str) -> Option<String> {
     Some(match crate::lang::detect(text) {
         crate::lang::Language::Chinese => "zh",
@@ -177,4 +189,23 @@ fn detect_lang(text: &str) -> Option<String> {
 #[allow(dead_code)]
 fn _now_mono() -> Instant {
     Instant::now()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ws_payload_shape() {
+        // The browser overlay / admin preview expect
+        // {"type":"partial","text":...} etc. Internally-tagged newtype
+        // variants holding a plain String are a serde_json trap (they do
+        // not serialize at all), so pin the exact wire format here.
+        let p = ws_payload(&SubtitleEvent::Partial("hello".to_string()));
+        assert_eq!(p, serde_json::json!({"type": "partial", "text": "hello"}));
+        let f = ws_payload(&SubtitleEvent::Final("world".to_string()));
+        assert_eq!(f, serde_json::json!({"type": "final", "text": "world"}));
+        let c = ws_payload(&SubtitleEvent::Cleared);
+        assert_eq!(c, serde_json::json!({"type": "cleared"}));
+    }
 }
