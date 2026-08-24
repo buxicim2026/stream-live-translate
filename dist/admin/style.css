@@ -156,6 +156,13 @@ a:hover { text-decoration: underline; }
   word-break: break-word;
 }
 .preview-caption.empty { opacity: 0; }
+/* Same two-line cap as the OBS overlay. */
+.preview-caption #preview-line {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 
 .actions { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
 button {

@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <title>Stream Live Translate · 控制台</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <link rel="stylesheet" href="/admin-assets/style.css?v=0.0.6.3" />
+  <link rel="stylesheet" href="/admin-assets/style.css?v=0.0.7" />
 </head>
 <body>
   <header class="topbar">
@@ -27,13 +27,20 @@
       <p class="hint">填入你自己的大模型 API Key。所有内容只在本地保存。</p>
       <label>Provider
         <select id="provider">
-          <option value="qwen-realtime">Qwen Realtime (DashScope)</option>
-          <option value="openai-realtime">OpenAI Realtime</option>
+          <option value="qwen-realtime">DashScope Realtime（通义翻译 / 语音识别模型）</option>
+          <option value="openai-realtime">OpenAI 兼容 Realtime（OpenAI 官方 / 百炼 compatible-mode）</option>
           <option value="mock">Mock（不消耗额度）</option>
         </select>
       </label>
       <label>Model
-        <input id="model" type="text" placeholder="qwen3.5-livetranslate-flash-realtime" />
+        <input id="model" type="text" list="model-presets" placeholder="qwen3.5-livetranslate-flash-realtime" />
+        <datalist id="model-presets">
+          <option value="qwen3.5-livetranslate-flash-realtime">同传翻译（推荐，多语言→目标语言）</option>
+          <option value="qwen3-asr-flash-realtime">通义语音识别（ASR）</option>
+          <option value="qwen-audio-realtime-plus">Qwen-Audio 实时识别</option>
+          <option value="qwen-audio-3.0-realtime-flash">Qwen-Audio 3.0 实时</option>
+          <option value="qwen-audio-3.0-asr-flash-streaming">Qwen-Audio 3.0 流式识别</option>
+        </datalist>
       </label>
       <label>API Key
         <input id="api_key" type="password" placeholder="sk-..." />
@@ -41,7 +48,7 @@
       <label>Base URL（接口地址）
         <input id="endpoint" type="text" placeholder="留空使用内置默认地址" />
       </label>
-      <p class="hint field-hint">API Key 从阿里云百炼控制台获取（格式 <code>sk-...</code>），不是网址。
+      <p class="hint field-hint" id="provider-hint">API Key 从阿里云百炼控制台获取（格式 <code>sk-...</code>），不是网址。
         Base URL 建议留空；compatible-mode 是 HTTP 聊天接口，实时翻译不能用。</p>
       <label>翻译目标语言
         <input id="target_lang" type="text" value="zh" />
@@ -147,7 +154,7 @@
     </section>
   </main>
 
-  <script src="/admin-assets/app.js?v=0.0.6.3"></script>
+  <script src="/admin-assets/app.js?v=0.0.7"></script>
   <div id="toast" class="toast" hidden></div>
 </body>
 </html>

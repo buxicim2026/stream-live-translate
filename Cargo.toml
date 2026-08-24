@@ -1,6 +1,6 @@
 [package]
 name = "stream-live-translate"
-version = "0.0.6+1"
+version = "0.0.7"
 edition = "2021"
 rust-version = "1.74"
 authors = ["Stream Live Translate Contributors"]

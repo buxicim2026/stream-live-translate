@@ -57,10 +57,25 @@
     }
   }
 
+  function fitTwoLines(text) {
+    // Hard cap: never render more than 2 lines. When a segment grows past
+    // that, drop text from the HEAD so the newest words stay visible
+    // (matches how real live captions behave). CSS line-clamp is a safety net.
+    lineEl.textContent = text;
+    const fs = parseFloat(getComputedStyle(lineEl).fontSize) || 48;
+    const lh = parseFloat(getComputedStyle(lineEl).lineHeight) || fs * 1.25;
+    let t = text;
+    while (t.length > 0 && lineEl.scrollHeight > lh * 2 + 1) {
+      // Trim in ~8% chunks instead of one char at a time.
+      t = t.slice(Math.max(1, Math.floor(t.length * 0.08)));
+      lineEl.textContent = t;
+    }
+    return t;
+  }
+
   function show(text) {
     if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
-    currentText = text;
-    lineEl.textContent = text;
+    currentText = fitTwoLines(text);
     captionEl.classList.remove("empty");
     captionEl.classList.add("show");
   }

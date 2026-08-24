@@ -56,6 +56,20 @@
     $("ov-animation").value = cfg.overlay.animation;
     $("obs-dock-url").textContent =
       `${location.protocol}//${location.host}/admin?obsDock=1`;
+    updateProviderHint();
+  }
+
+  // Per-provider guidance shown under the Base URL field.
+  const PROVIDER_HINTS = {
+    "qwen-realtime":
+      "支持阿里云百炼 Realtime API 的全部模型：同传翻译推荐 qwen3.5-livetranslate-flash-realtime，语音识别可选 qwen3-asr-flash-realtime、Qwen-Audio 系列。API Key 从百炼控制台获取（sk-...），Base URL 通常留空。",
+    "openai-realtime":
+      "支持任何 OpenAI 兼容的 Realtime WebSocket 接口。百炼模型：Base URL 填 wss://dashscope.aliyuncs.com/compatible-mode/v1/realtime，用同一个 API Key；OpenAI 官方：Base URL 留空（需可访问境外网络）。",
+    mock: "本地模拟输出，不联网、不消耗额度，仅用于界面测试。",
+  };
+  function updateProviderHint() {
+    const el = $("provider-hint");
+    if (el) el.textContent = PROVIDER_HINTS[$("provider").value] || "";
   }
 
   function collectPatch() {
@@ -216,6 +230,7 @@
   }
 
   // Wire up events.
+  $("provider").addEventListener("change", updateProviderHint);
   $("save-btn").addEventListener("click", async () => {
     const patch = collectPatch();
     // Catch the most common mis-fills before they reach the engine.
@@ -231,8 +246,19 @@
       }
     }
     if (patch.llm.provider === "qwen-realtime" && patch.llm.endpoint && /compatible-mode|http:|https:/i.test(patch.llm.endpoint)) {
-      toast("Base URL 不正确：实时翻译需要 WebSocket 地址（wss://...），建议留空使用内置默认；compatible-mode 是 HTTP 聊天接口，不能用", "error");
+      toast("Base URL 不正确：DashScope Realtime 需要 WebSocket 地址（wss://...），建议留空使用内置默认；compatible-mode/v1（不带 /realtime）是 HTTP 聊天接口，不能用", "error");
       return;
+    }
+    if (patch.llm.provider === "openai-realtime" && patch.llm.endpoint) {
+      const ep = patch.llm.endpoint.trim();
+      if (!/^wss?:/i.test(ep)) {
+        toast("Base URL 必须是 WebSocket 地址（wss:// 开头）。百炼模型请填 wss://dashscope.aliyuncs.com/compatible-mode/v1/realtime", "error");
+        return;
+      }
+      if (/compatible-mode\/v1\/?$/i.test(ep) || /compatible-mode\/v1\?(?!.*realtime)/i.test(ep)) {
+        toast("compatible-mode 地址缺少 /realtime 后缀：正确形式是 wss://dashscope.aliyuncs.com/compatible-mode/v1/realtime", "error");
+        return;
+      }
     }
     const btn = $("save-btn");
     btn.disabled = true;
