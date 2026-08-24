@@ -1,35 +1,35 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
-  <title>Stream Live Translate · 控制台</title>
+  <title>Stream Live Translate 路 鎺у埗鍙?/title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <link rel="stylesheet" href="/admin-assets/style.css?v=0.0.6.2" />
+  <link rel="stylesheet" href="/admin-assets/style.css?v=0.0.6.3" />
 </head>
 <body>
   <header class="topbar">
     <div class="brand">
-      <span class="logo">●</span>
+      <span class="logo">鈼?/span>
       <span>Stream Live Translate</span>
     </div>
     <div class="status-strip" id="status-strip">
-      <span class="dot" id="dot-audio"></span><span>音频</span>
-      <span class="dot" id="dot-llm"></span><span>大模型</span>
+      <span class="dot" id="dot-audio"></span><span>闊抽</span>
+      <span class="dot" id="dot-llm"></span><span>澶фā鍨?/span>
       <span class="dot" id="dot-obs"></span><span>OBS</span>
-      <span class="sep">·</span>
-      <span id="run-state" class="run-state idle">检测中…</span>
+      <span class="sep">路</span>
+      <span id="run-state" class="run-state idle">妫€娴嬩腑鈥?/span>
     </div>
   </header>
 
   <main class="grid">
     <section class="card">
-      <h2>1. 大模型</h2>
-      <p class="hint">填入你自己的大模型 API Key。所有内容只在本地保存。</p>
+      <h2>1. 澶фā鍨?/h2>
+      <p class="hint">濉叆浣犺嚜宸辩殑澶фā鍨?API Key銆傛墍鏈夊唴瀹瑰彧鍦ㄦ湰鍦颁繚瀛樸€?/p>
       <label>Provider
         <select id="provider">
           <option value="qwen-realtime">Qwen Realtime (DashScope)</option>
           <option value="openai-realtime">OpenAI Realtime</option>
-          <option value="mock">Mock（不消耗额度）</option>
+          <option value="mock">Mock锛堜笉娑堣€楅搴︼級</option>
         </select>
       </label>
       <label>Model
@@ -38,92 +38,92 @@
       <label>API Key
         <input id="api_key" type="password" placeholder="sk-..." />
       </label>
-      <label>Base URL（接口地址）
-        <input id="endpoint" type="text" placeholder="留空使用内置默认地址" />
+      <label>Base URL锛堟帴鍙ｅ湴鍧€锛?
+        <input id="endpoint" type="text" placeholder="鐣欑┖浣跨敤鍐呯疆榛樿鍦板潃" />
       </label>
-      <p class="hint field-hint">Qwen 默认 <code>wss://dashscope.aliyuncs.com/api-ws/v1/realtime</code>；
-        若你的 Key 属于百炼业务空间，请填专属域名，例如 <code>wss://你的WorkspaceId.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime</code>。</p>
-      <label>翻译目标语言
+      <p class="hint field-hint">API Key 浠庨樋閲屼簯鐧剧偧鎺у埗鍙拌幏鍙栵紙鏍煎紡 <code>sk-...</code>锛夛紝涓嶆槸缃戝潃銆?
+        Base URL 寤鸿鐣欑┖锛沜ompatible-mode 鏄?HTTP 鑱婂ぉ鎺ュ彛锛屽疄鏃剁炕璇戜笉鑳界敤銆?/p>
+      <label>缈昏瘧鐩爣璇█
         <input id="target_lang" type="text" value="zh" />
       </label>
       <label class="row">
         <input id="translate_chinese" type="checkbox" />
-        <span>对中文也调用翻译（默认否，节省 token）</span>
+        <span>瀵逛腑鏂囦篃璋冪敤缈昏瘧锛堥粯璁ゅ惁锛岃妭鐪?token锛?/span>
       </label>
     </section>
 
     <section class="card">
-      <h2>2. 音频输入</h2>
-      <p class="hint">系统音频环回 = 抓取 OBS 当前听到的声音；麦克风 = 抓指定输入设备。</p>
-      <label>模式
+      <h2>2. 闊抽杈撳叆</h2>
+      <p class="hint">绯荤粺闊抽鐜洖 = 鎶撳彇 OBS 褰撳墠鍚埌鐨勫０闊筹紱楹﹀厠椋?= 鎶撴寚瀹氳緭鍏ヨ澶囥€?/p>
+      <label>妯″紡
         <select id="audio-mode">
-          <option value="obs_filter">OBS 插件送音（插件模式下自动使用，请勿更改）</option>
-          <option value="system">系统音频环回（独立运行时）</option>
-          <option value="device">指定输入/输出设备</option>
+          <option value="obs_filter">OBS 鎻掍欢閫侀煶锛堟彃浠舵ā寮忎笅鑷姩浣跨敤锛岃鍕挎洿鏀癸級</option>
+          <option value="system">绯荤粺闊抽鐜洖锛堢嫭绔嬭繍琛屾椂锛?/option>
+          <option value="device">鎸囧畾杈撳叆/杈撳嚭璁惧</option>
         </select>
       </label>
-      <p class="hint" id="audio-mode-lock" hidden>🔒 引擎由 OBS 插件启动，音频由插件直接送入，模式已锁定。</p>
-      <label>设备
+      <p class="hint" id="audio-mode-lock" hidden>馃敀 寮曟搸鐢?OBS 鎻掍欢鍚姩锛岄煶棰戠敱鎻掍欢鐩存帴閫佸叆锛屾ā寮忓凡閿佸畾銆?/p>
+      <label>璁惧
         <select id="audio-device"></select>
       </label>
       <label class="row">
         <input id="use_sck" type="checkbox" />
-        <span>macOS 使用 ScreenCaptureKit（需要授予"屏幕录制"权限）</span>
+        <span>macOS 浣跨敤 ScreenCaptureKit锛堥渶瑕佹巿浜?灞忓箷褰曞埗"鏉冮檺锛?/span>
       </label>
     </section>
 
     <section class="card">
-      <h2>3. OBS 集成</h2>
-      <p class="hint">插件自动连接本机 OBS（obs-websocket v5），可把字幕同步写入一个"Subtitles"文本源。</p>
+      <h2>3. OBS 闆嗘垚</h2>
+      <p class="hint">鎻掍欢鑷姩杩炴帴鏈満 OBS锛坥bs-websocket v5锛夛紝鍙妸瀛楀箷鍚屾鍐欏叆涓€涓?Subtitles"鏂囨湰婧愩€?/p>
       <label class="row">
         <input id="obs-auto" type="checkbox" />
-        <span>启动时自动连接</span>
+        <span>鍚姩鏃惰嚜鍔ㄨ繛鎺?/span>
       </label>
-      <label>OBS WebSocket 地址
+      <label>OBS WebSocket 鍦板潃
         <input id="obs-host" type="text" placeholder="127.0.0.1" />
       </label>
-      <label>OBS 端口
+      <label>OBS 绔彛
         <input id="obs-port" type="number" value="4455" />
       </label>
-      <label>OBS 密码（如果开启了）
+      <label>OBS 瀵嗙爜锛堝鏋滃紑鍚簡锛?
         <input id="obs-password" type="password" />
       </label>
       <p class="hint obs-dock-hint">
-        想把控制台钉到 OBS 侧边栏？OBS → 顶部菜单 <b>工具</b> → <b>自定义浏览器停靠面板 (Custom Browser Docks)</b> →
-        填入 <code id="obs-dock-url"></code>，名称随意。
+        鎯虫妸鎺у埗鍙伴拤鍒?OBS 渚ц竟鏍忥紵OBS 鈫?椤堕儴鑿滃崟 <b>宸ュ叿</b> 鈫?<b>鑷畾涔夋祻瑙堝櫒鍋滈潬闈㈡澘 (Custom Browser Docks)</b> 鈫?
+        濉叆 <code id="obs-dock-url"></code>锛屽悕绉伴殢鎰忋€?
       </p>
     </section>
 
     <section class="card">
-      <h2>4. 字幕样式</h2>
-      <p class="hint">这些值会写入浏览器源的 URL hash 覆盖默认值。</p>
-      <label>字体大小 (px)
+      <h2>4. 瀛楀箷鏍峰紡</h2>
+      <p class="hint">杩欎簺鍊间細鍐欏叆娴忚鍣ㄦ簮鐨?URL hash 瑕嗙洊榛樿鍊笺€?/p>
+      <label>瀛椾綋澶у皬 (px)
         <input id="ov-size" type="number" value="48" />
       </label>
-      <label>颜色
+      <label>棰滆壊
         <input id="ov-color" type="color" value="#ffffff" />
       </label>
-      <label>背景
+      <label>鑳屾櫙
         <input id="ov-bg" type="color" value="#000000" />
       </label>
-      <label>位置
+      <label>浣嶇疆
         <select id="ov-position">
-          <option value="bottom">底部</option>
-          <option value="top">顶部</option>
-          <option value="middle">中间</option>
+          <option value="bottom">搴曢儴</option>
+          <option value="top">椤堕儴</option>
+          <option value="middle">涓棿</option>
         </select>
       </label>
-      <label>动画
+      <label>鍔ㄧ敾
         <select id="ov-animation">
-          <option value="typewriter">打字机</option>
-          <option value="fade">淡入淡出</option>
-          <option value="slide">滑入</option>
+          <option value="typewriter">鎵撳瓧鏈?/option>
+          <option value="fade">娣″叆娣″嚭</option>
+          <option value="slide">婊戝叆</option>
         </select>
       </label>
     </section>
 
     <section class="card wide">
-      <h2>5. 实时字幕预览</h2>
+      <h2>5. 瀹炴椂瀛楀箷棰勮</h2>
       <div class="preview">
         <div id="preview-stage" class="preview-stage position-bottom">
           <div id="preview-caption" class="preview-caption empty">
@@ -132,9 +132,9 @@
         </div>
       </div>
       <div class="actions">
-        <button id="save-btn">保存配置</button>
-        <button id="restart-btn" class="ghost">重启管线</button>
-        <button id="clear-btn" class="ghost">清空字幕</button>
+        <button id="save-btn">淇濆瓨閰嶇疆</button>
+        <button id="restart-btn" class="ghost">閲嶅惎绠＄嚎</button>
+        <button id="clear-btn" class="ghost">娓呯┖瀛楀箷</button>
         <span id="save-status" class="status"></span>
       </div>
       <div id="engine-error" class="engine-error" hidden></div>
@@ -142,12 +142,12 @@
     </section>
 
     <section class="card wide">
-      <h2>6. 历史</h2>
+      <h2>6. 鍘嗗彶</h2>
       <div id="history" class="history"></div>
     </section>
   </main>
 
-  <script src="/admin-assets/app.js?v=0.0.6.2"></script>
+  <script src="/admin-assets/app.js?v=0.0.6.3"></script>
   <div id="toast" class="toast" hidden></div>
 </body>
 </html>

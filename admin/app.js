@@ -218,6 +218,22 @@
   // Wire up events.
   $("save-btn").addEventListener("click", async () => {
     const patch = collectPatch();
+    // Catch the most common mis-fills before they reach the engine.
+    const key = patch.llm.api_key.trim();
+    if (patch.llm.provider !== "mock") {
+      if (!key) {
+        toast("请先填写 API Key（阿里云百炼控制台获取，格式 sk-...）", "error");
+        return;
+      }
+      if (/^https?:/i.test(key) || key.includes("://")) {
+        toast("API Key 填成了网址！Key 是以 sk- 开头的密钥；网址应填在 Base URL 框（Qwen 建议留空）", "error");
+        return;
+      }
+    }
+    if (patch.llm.provider === "qwen-realtime" && patch.llm.endpoint && /compatible-mode|http:|https:/i.test(patch.llm.endpoint)) {
+      toast("Base URL 不正确：实时翻译需要 WebSocket 地址（wss://...），建议留空使用内置默认；compatible-mode 是 HTTP 聊天接口，不能用", "error");
+      return;
+    }
     const btn = $("save-btn");
     btn.disabled = true;
     btn.textContent = "保存中…";

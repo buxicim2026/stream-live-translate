@@ -83,15 +83,42 @@ pub mod qwen {
             sink: SubtitleSink,
         ) -> Result<()> {
             let url = format!("{}?model={}", self.endpoint, self.cfg.model);
+            // Pre-build the failure message: `url` is consumed by
+            // into_client_request() below.
+            let conn_ctx = format!("连接 Qwen 实时服务失败 ({url})");
             let mut req = url
                 .into_client_request()
                 .with_context(|| "build qwen ws request")?;
             req.headers_mut()
                 .insert("Authorization", http::HeaderValue::from_str(&format!("Bearer {}", self.cfg.api_key))?);
 
-            let (ws, _resp) = tokio_tungstenite::connect_async(req)
-                .await
-                .with_context(|| "connect to qwen realtime")?;
+            let (ws, _resp) = match tokio_tungstenite::connect_async(req).await {
+                Ok(pair) => pair,
+                Err(e) => {
+                    // Surface the real reason: DashScope answers failed
+                    // handshakes with an HTTP status + JSON error body
+                    // (invalid key, unknown model, workspace endpoint
+                    // required, ...). Plain Display would swallow it.
+                    use tokio_tungstenite::tungstenite::Error as WsErr;
+                    let http_detail = match &e {
+                        WsErr::Http(resp) => {
+                            let body = resp
+                                .body()
+                                .as_ref()
+                                .map(|b| String::from_utf8_lossy(b).trim().to_string())
+                                .unwrap_or_default();
+                            Some(format!("HTTP {} {}", resp.status().as_u16(), body))
+                        }
+                        _ => None,
+                    };
+                    if let Some(detail) = http_detail {
+                        return Err(anyhow!(
+                            "连接 Qwen 实时服务被拒绝：{detail}（请检查 API Key 是否有效、模型名是否正确；若 Key 属于百炼业务空间，请在 Base URL 填专属域名）"
+                        ));
+                    }
+                    return Err(anyhow!(e)).with_context(|| conn_ctx);
+                }
+            };
             info!("connected to qwen realtime");
             let (mut write_half, mut read_half) = ws.split();
 

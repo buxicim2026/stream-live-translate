@@ -112,7 +112,9 @@ async fn run(
                 warn!(error = %e, "pipeline failed");
                 {
                     let mut s = state.status.write();
-                    s.last_error = Some(e.to_string());
+                    // {:#} flattens the full anyhow cause chain so the admin
+                    // panel shows e.g. "connect to qwen realtime: HTTP 401".
+                    s.last_error = Some(format!("{e:#}"));
                     s.audio_active = false;
                     s.llm_connected = false;
                 }
@@ -253,7 +255,7 @@ async fn try_start(state: &Arc<AppState>, handle: &Arc<PipelineHandle>) -> Resul
             Ok(p) => p,
             Err(e) => {
                 let mut s = llm_state.status.write();
-                s.last_error = Some(e.to_string());
+                s.last_error = Some(format!("{e:#}"));
                 s.llm_connected = false;
                 return;
             }
@@ -271,7 +273,7 @@ async fn try_start(state: &Arc<AppState>, handle: &Arc<PipelineHandle>) -> Resul
                 warn!(error = %e, "LLM session ended");
                 let mut s = llm_state.status.write();
                 s.llm_connected = false;
-                s.last_error = Some(e.to_string());
+                s.last_error = Some(format!("{e:#}"));
             }
         }
     });
