@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <title>Stream Live Translate · 控制台</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <link rel="stylesheet" href="/admin-assets/style.css?v=0.0.7" />
+  <link rel="stylesheet" href="/admin-assets/style.css?v=0.0.8" />
 </head>
 <body>
   <header class="topbar">
@@ -25,14 +25,19 @@
     <section class="card">
       <h2>1. 大模型</h2>
       <p class="hint">填入你自己的大模型 API Key。所有内容只在本地保存。</p>
-      <label>Provider
-        <select id="provider">
-          <option value="qwen-realtime">DashScope Realtime（通义翻译 / 语音识别模型）</option>
-          <option value="openai-realtime">OpenAI 兼容 Realtime（OpenAI 官方 / 百炼 compatible-mode）</option>
-          <option value="mock">Mock（不消耗额度）</option>
+      <label>API 服务
+        <select id="provider-type">
+          <option value="qwen">通义 Qwen API（推荐）</option>
+          <option value="online">其它在线 API（GPT / Gemini / 火山引擎 / 讯飞等）</option>
+          <option value="local">本机部署 API（Ollama / LocalAI 等）</option>
+          <option value="mock">模拟模式（不消耗额度）</option>
         </select>
       </label>
-      <label>Model
+      <div id="provider-hint-box" class="provider-hint-box qwen">
+        <strong>💡 通义 Qwen API</strong><br />
+        推荐使用 <code>qwen3.5-livetranslate-flash-realtime</code> 模型，支持实时语音同传翻译。
+      </div>
+      <label>Model（模型名称）
         <input id="model" type="text" list="model-presets" placeholder="qwen3.5-livetranslate-flash-realtime" />
         <datalist id="model-presets">
           <option value="qwen3.5-livetranslate-flash-realtime">同传翻译（推荐，多语言→目标语言）</option>
@@ -48,8 +53,6 @@
       <label>Base URL（接口地址）
         <input id="endpoint" type="text" placeholder="留空使用内置默认地址" />
       </label>
-      <p class="hint field-hint" id="provider-hint">API Key 从阿里云百炼控制台获取（格式 <code>sk-...</code>），不是网址。
-        Base URL 建议留空；compatible-mode 是 HTTP 聊天接口，实时翻译不能用。</p>
       <label>翻译目标语言
         <input id="target_lang" type="text" value="zh" />
       </label>
@@ -154,7 +157,7 @@
     </section>
   </main>
 
-  <script src="/admin-assets/app.js?v=0.0.7"></script>
+  <script src="/admin-assets/app.js?v=0.0.8"></script>
   <div id="toast" class="toast" hidden></div>
 </body>
 </html>

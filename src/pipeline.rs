@@ -196,7 +196,6 @@ async fn try_start(state: &Arc<AppState>, handle: &Arc<PipelineHandle>) -> Resul
     let vad_cfg = cfg.filter.clone();
     let audio_task = tokio::spawn(async move {
         let mut vad = Vad::new(vad_cfg);
-        let mut speech_buf: Vec<i16> = Vec::with_capacity(16 * 1024);
         let mut last_kind = SegmentKind::Silence;
         let mut silence_debounce_ms: u32 = 0;
         loop {
@@ -213,29 +212,19 @@ async fn try_start(state: &Arc<AppState>, handle: &Arc<PipelineHandle>) -> Resul
             let decision = vad.decide(&frame, spec_rate);
             match decision.kind {
                 SegmentKind::Speech => {
-                    if matches!(last_kind, SegmentKind::Silence) {
-                        speech_buf.clear();
-                    }
-                    speech_buf.extend_from_slice(&frame);
                     let _ = speech_tx.try_send(frame.clone());
                     last_kind = SegmentKind::Speech;
                 }
                 SegmentKind::Music => {
-                    // Drop the frame; also flush the current buffer.
-                    speech_buf.clear();
                     last_kind = SegmentKind::Music;
                 }
                 SegmentKind::Silence => {
-                    // Realtime providers (server VAD) need a *continuous*
-                    // audio stream to detect end-of-speech, so forward
-                    // silence frames downstream too. Only music is dropped.
                     let _ = speech_tx.try_send(frame.clone());
                     if matches!(last_kind, SegmentKind::Speech) {
                         let frame_ms = (frame.len() as u64 * 1000
                             / spec_rate as u64) as u32;
                         silence_debounce_ms = silence_debounce_ms.saturating_add(frame_ms);
                         if silence_debounce_ms > 350 {
-                            // End of segment; the LLM commits on its own.
                             last_kind = SegmentKind::Silence;
                             silence_debounce_ms = 0;
                         }
@@ -244,8 +233,6 @@ async fn try_start(state: &Arc<AppState>, handle: &Arc<PipelineHandle>) -> Resul
                     }
                 }
             }
-            let _ = speech_buf;
-            let _ = &vad_state;
         }
     });
 

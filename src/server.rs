@@ -247,7 +247,13 @@ async fn post_config(
     let verified = std::fs::read_to_string(crate::config_path())
         .ok()
         .and_then(|raw| toml::from_str::<crate::config::Config>(&raw).ok())
-        .map(|disk| disk.llm.api_key == cfg.llm.api_key && disk.llm.model == cfg.llm.model)
+        .map(|disk| {
+            disk.llm.api_key == cfg.llm.api_key
+                && disk.llm.model == cfg.llm.model
+                && disk.llm.provider == cfg.llm.provider
+                && disk.server.host == cfg.server.host
+                && disk.server.port == cfg.server.port
+        })
         .unwrap_or(false);
     if !verified {
         warn!(path = %crate::config_path().display(), "config write verification FAILED: disk content differs from what was just saved");
@@ -277,6 +283,8 @@ fn merge_json(cfg: &mut Config, patch: &serde_json::Value) -> anyhow::Result<()>
     Ok(())
 }
 
+use serde_json::Value;
+
 fn json_merge(dst: &mut serde_json::Value, patch: &serde_json::Value) {
     use serde_json::Value::Object;
     if let (Object(d), Object(p)) = (&mut *dst, patch) {
@@ -287,12 +295,11 @@ fn json_merge(dst: &mut serde_json::Value, patch: &serde_json::Value) {
                 json_merge(d.entry(k.clone()).or_insert(Value::Null), v);
             }
         }
-    } else {
+    } else if !patch.is_null() {
         *dst = patch.clone();
     }
 }
 
-use serde_json::Value;
 
 async fn get_devices() -> Response {
     match crate::audio::list_devices() {

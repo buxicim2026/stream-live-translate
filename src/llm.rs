@@ -490,12 +490,11 @@ pub mod mock {
             let mut i = 0;
             while audio_rx.recv().await.is_some() {
                 let (src, zh) = &phrases[i % phrases.len()];
-                let _ = src; // unused; mock is bilingual-aware but we always emit zh
-                sink.push(SubtitleEvent::Partial(zh.to_string()));
+                let output = if self.cfg.translate_chinese { zh } else { src };
+                sink.push(SubtitleEvent::Partial(output.to_string()));
                 sleep(Duration::from_millis(900)).await;
-                sink.push(SubtitleEvent::Final(zh.to_string()));
+                sink.push(SubtitleEvent::Final(output.to_string()));
                 i += 1;
-                let _ = &self.cfg;
             }
             Ok(())
         }

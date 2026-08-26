@@ -221,7 +221,7 @@ pub struct DeviceInfo {
 /// Helper: resample a chunk of mono s16le PCM from `from_rate` to `to_rate`.
 /// Uses simple linear interpolation; good enough for VAD and ASR.
 pub fn resample_mono(input: &[i16], from_rate: u32, to_rate: u32) -> Vec<i16> {
-    if from_rate == to_rate || input.is_empty() {
+    if from_rate == 0 || from_rate == to_rate || input.is_empty() {
         return input.to_vec();
     }
     let ratio = to_rate as f64 / from_rate as f64;

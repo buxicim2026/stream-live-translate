@@ -27,13 +27,85 @@
     toastTimer = setTimeout(() => { el.hidden = true; }, 3500);
   }
 
+  // Provider type to internal provider name mapping
+  const PROVIDER_TYPE_MAP = {
+    "qwen": "qwen-realtime",
+    "online": "openai-realtime",
+    "local": "openai-realtime",
+    "mock": "mock"
+  };
+
+  // Per-provider-type hints
+  const PROVIDER_HINTS = {
+    "qwen": {
+      hint: "通义 Qwen API 适用于 qwen3.5-livetranslate-flash-realtime 模型，支持实时语音同传翻译。API Key 从阿里云百炼控制台获取（格式 sk-...）。",
+      modelPlaceholder: "qwen3.5-livetranslate-flash-realtime",
+      modelSuggestions: [
+        { value: "qwen3.5-livetranslate-flash-realtime", label: "同传翻译（推荐，多语言→目标语言）" },
+        { value: "qwen3-asr-flash-realtime", label: "通义语音识别（ASR）" },
+        { value: "qwen-audio-realtime-plus", label: "Qwen-Audio 实时识别" },
+        { value: "qwen-audio-3.0-realtime-flash", label: "Qwen-Audio 3.0 实时" },
+        { value: "qwen-audio-3.0-asr-flash-streaming", label: "Qwen-Audio 3.0 流式识别" }
+      ],
+      endpointPlaceholder: "留空使用内置默认地址（wss://dashscope.aliyuncs.com/api-ws/v1/realtime）",
+      endpointDefault: "",
+      className: "qwen"
+    },
+    "online": {
+      hint: "支持 OpenAI 兼容的 Realtime WebSocket 接口，包括 GPT、Gemini、火山引擎、讯飞等在线 API。Base URL 填对应的 WebSocket 地址（wss://...）。",
+      modelPlaceholder: "gpt-4o-realtime",
+      modelSuggestions: [
+        { value: "gpt-4o-realtime", label: "OpenAI GPT-4o Realtime" },
+        { value: "gpt-4o-mini-realtime", label: "OpenAI GPT-4o-mini Realtime" },
+        { value: "gemini-2.0-flash-exp", label: "Google Gemini 2.0 Flash" }
+      ],
+      endpointPlaceholder: "例如：wss://api.openai.com/v1/realtime",
+      endpointDefault: "wss://api.openai.com/v1/realtime",
+      className: "online"
+    },
+    "local": {
+      hint: "支持本机部署的兼容 API（如 Ollama、LocalAI 等）。Base URL 填本机地址，例如：ws://localhost:11434/v1/realtime",
+      modelPlaceholder: "模型名称（根据你的本地部署）",
+      modelSuggestions: [
+        { value: "llama3.2-realtime", label: "Llama 3.2 Realtime（Ollama）" },
+        { value: "qwen2.5-realtime", label: "Qwen 2.5 Realtime（Ollama）" }
+      ],
+      endpointPlaceholder: "例如：ws://localhost:11434/v1/realtime",
+      endpointDefault: "ws://localhost:11434/v1/realtime",
+      className: "local"
+    },
+    "mock": {
+      hint: "本地模拟输出，不联网、不消耗额度，仅用于界面测试。",
+      modelPlaceholder: "mock",
+      modelSuggestions: [],
+      endpointPlaceholder: "无需填写",
+      endpointDefault: "",
+      className: "qwen"
+    }
+  };
+
   function fillForm(cfg) {
-    $("provider").value = cfg.llm.provider;
+    // Determine provider type from internal provider name
+    let providerType = "online";
+    if (cfg.llm.provider === "qwen-realtime") providerType = "qwen";
+    else if (cfg.llm.provider === "mock") providerType = "mock";
+    else if (cfg.llm.provider === "openai-realtime") {
+      // Guess type from endpoint
+      const ep = cfg.llm.endpoint || "";
+      if (ep.includes("localhost") || ep.includes("127.0.0.1")) {
+        providerType = "local";
+      } else {
+        providerType = "online";
+      }
+    }
+    
+    $("provider-type").value = providerType;
     $("model").value = cfg.llm.model;
     $("api_key").value = cfg.llm.api_key;
     $("endpoint").value = cfg.llm.endpoint || "";
     $("target_lang").value = cfg.llm.target_lang;
     $("translate_chinese").checked = cfg.llm.translate_chinese;
+
     // Defensive: if the config's mode isn't among the options (old cached
     // page), add it so saving can never silently switch the mode.
     const modeSel = $("audio-mode");
@@ -56,26 +128,57 @@
     $("ov-animation").value = cfg.overlay.animation;
     $("obs-dock-url").textContent =
       `${location.protocol}//${location.host}/admin?obsDock=1`;
-    updateProviderHint();
+
+    updateProviderUI();
   }
 
-  // Per-provider guidance shown under the Base URL field.
-  const PROVIDER_HINTS = {
-    "qwen-realtime":
-      "支持阿里云百炼 Realtime API 的全部模型：同传翻译推荐 qwen3.5-livetranslate-flash-realtime，语音识别可选 qwen3-asr-flash-realtime、Qwen-Audio 系列。API Key 从百炼控制台获取（sk-...），Base URL 通常留空。",
-    "openai-realtime":
-      "支持任何 OpenAI 兼容的 Realtime WebSocket 接口。百炼模型：Base URL 填 wss://dashscope.aliyuncs.com/compatible-mode/v1/realtime，用同一个 API Key；OpenAI 官方：Base URL 留空（需可访问境外网络）。",
-    mock: "本地模拟输出，不联网、不消耗额度，仅用于界面测试。",
-  };
-  function updateProviderHint() {
-    const el = $("provider-hint");
-    if (el) el.textContent = PROVIDER_HINTS[$("provider").value] || "";
+  // Update UI based on selected provider type
+  function updateProviderUI() {
+    const providerType = $("provider-type").value;
+    const hintData = PROVIDER_HINTS[providerType];
+    const hintBox = $("provider-hint-box");
+    const modelInput = $("model");
+    const endpointInput = $("endpoint");
+    const modelDatalist = $("model-presets");
+
+    // Update hint box
+    hintBox.className = "provider-hint-box " + hintData.className;
+    if (providerType === "qwen") {
+      hintBox.innerHTML = `<strong>💡 通义 Qwen API</strong><br />推荐使用 <code>qwen3.5-livetranslate-flash-realtime</code> 模型，支持实时语音同传翻译。`;
+    } else if (providerType === "online") {
+      hintBox.innerHTML = `<strong>🌐 其它在线 API</strong><br />支持 OpenAI 兼容接口的在线服务，包括 GPT、Gemini、火山引擎、讯飞等。`;
+    } else if (providerType === "local") {
+      hintBox.innerHTML = `<strong>💻 本机部署 API</strong><br />连接本地运行的模型服务（如 Ollama）。需要确保服务已启动并开启 Realtime API。`;
+    } else if (providerType === "mock") {
+      hintBox.innerHTML = `<strong>🧪 模拟模式</strong><br />本地模拟输出，不联网、不消耗额度，仅用于界面测试。`;
+    }
+
+    // Update model placeholder
+    modelInput.placeholder = hintData.modelPlaceholder;
+
+    // Update model datalist
+    modelDatalist.innerHTML = "";
+    hintData.modelSuggestions.forEach(suggestion => {
+      const option = document.createElement("option");
+      option.value = suggestion.value;
+      option.textContent = suggestion.label;
+      modelDatalist.appendChild(option);
+    });
+
+    // Update endpoint
+    endpointInput.placeholder = hintData.endpointPlaceholder;
+    if (providerType !== "mock" && !endpointInput.value) {
+      endpointInput.value = hintData.endpointDefault;
+    }
   }
 
   function collectPatch() {
+    const providerType = $("provider-type").value;
+    const provider = PROVIDER_TYPE_MAP[providerType];
+    
     return {
       llm: {
-        provider: $("provider").value,
+        provider: provider,
         model: $("model").value,
         api_key: $("api_key").value,
         endpoint: $("endpoint").value.trim() || null,
@@ -230,36 +333,55 @@
   }
 
   // Wire up events.
-  $("provider").addEventListener("change", updateProviderHint);
+  $("provider-type").addEventListener("change", updateProviderUI);
   $("save-btn").addEventListener("click", async () => {
     const patch = collectPatch();
-    // Catch the most common mis-fills before they reach the engine.
     const key = patch.llm.api_key.trim();
+
+    // Validation
     if (patch.llm.provider !== "mock") {
       if (!key) {
-        toast("请先填写 API Key（阿里云百炼控制台获取，格式 sk-...）", "error");
+        toast("请先填写 API Key", "error");
         return;
       }
       if (/^https?:/i.test(key) || key.includes("://")) {
-        toast("API Key 填成了网址！Key 是以 sk- 开头的密钥；网址应填在 Base URL 框（Qwen 建议留空）", "error");
+        toast("API Key 填成了网址！Key 是以 sk- 开头的密钥", "error");
         return;
       }
     }
-    if (patch.llm.provider === "qwen-realtime" && patch.llm.endpoint && /compatible-mode|http:|https:/i.test(patch.llm.endpoint)) {
-      toast("Base URL 不正确：DashScope Realtime 需要 WebSocket 地址（wss://...），建议留空使用内置默认；compatible-mode/v1（不带 /realtime）是 HTTP 聊天接口，不能用", "error");
-      return;
-    }
-    if (patch.llm.provider === "openai-realtime" && patch.llm.endpoint) {
-      const ep = patch.llm.endpoint.trim();
-      if (!/^wss?:/i.test(ep)) {
-        toast("Base URL 必须是 WebSocket 地址（wss:// 开头）。百炼模型请填 wss://dashscope.aliyuncs.com/compatible-mode/v1/realtime", "error");
-        return;
-      }
-      if (/compatible-mode\/v1\/?$/i.test(ep) || /compatible-mode\/v1\?(?!.*realtime)/i.test(ep)) {
-        toast("compatible-mode 地址缺少 /realtime 后缀：正确形式是 wss://dashscope.aliyuncs.com/compatible-mode/v1/realtime", "error");
+
+    const providerType = $("provider-type").value;
+
+    // Qwen-specific validation
+    if (providerType === "qwen") {
+      if (patch.llm.endpoint && /compatible-mode|http:|https:/i.test(patch.llm.endpoint)) {
+        toast("Base URL 不正确：DashScope Realtime 需要 WebSocket 地址（wss://...），建议留空使用内置默认", "error");
         return;
       }
     }
+
+    // Online API validation
+    if (providerType === "online") {
+      const ep = patch.llm.endpoint?.trim() || "";
+      if (ep && !/^wss?:/i.test(ep)) {
+        toast("Base URL 必须是 WebSocket 地址（wss:// 开头）", "error");
+        return;
+      }
+    }
+
+    // Local API validation
+    if (providerType === "local") {
+      const ep = patch.llm.endpoint?.trim() || "";
+      if (!ep) {
+        toast("请填写本机部署 API 的地址，例如 ws://localhost:11434/v1/realtime", "error");
+        return;
+      }
+      if (!/^ws?:/i.test(ep)) {
+        toast("本机 API 地址必须是 WebSocket 地址（ws:// 开头）", "error");
+        return;
+      }
+    }
+
     const btn = $("save-btn");
     btn.disabled = true;
     btn.textContent = "保存中…";
@@ -275,8 +397,6 @@
         toast("保存失败：" + msg, "error");
         return;
       }
-      // Verify the value is live in the engine. Disk persistence is
-      // verified server-side (write-verify); a failure there returns 500.
       await loadConfig();
       const saved = currentConfig && currentConfig.llm.api_key === patch.llm.api_key
         && currentConfig.llm.model === patch.llm.model;
@@ -285,7 +405,6 @@
       } else {
         toast("⚠️ 已保存，但读回内容不一致，请检查配置文件权限", "error");
       }
-      // Restart the pipeline so the new key/model/endpoint are used.
       await fetch("/api/restart", { method: "POST" });
       setTimeout(loadStatus, 800);
     } catch (e) {
