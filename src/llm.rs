@@ -279,38 +279,46 @@ pub mod qwen {
         Other,
     }
 
-    fn handle_event(ev: &QwenEvent, sink: &SubtitleSink) {
-        match ev {
-            // NOTE: the sink *appends* partials, so we forward only the
-            // confirmed increment. The speculative `stash` is dropped here
-            // and restored by `ResponseTextDone` (Final supersedes the
-            // partial buffer when it is longer).
-            QwenEvent::ResponseTextText { text, .. } => {
-                if !text.is_empty() {
-                    sink.push(SubtitleEvent::Partial(text.clone()));
+  fn handle_event(ev: &QwenEvent, sink: &SubtitleSink) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static LAST_TEXT_LEN: AtomicUsize = AtomicUsize::new(0);
+    match ev {
+        QwenEvent::ResponseTextText { text, .. } => {
+            if !text.is_empty() {
+                let prev_len = LAST_TEXT_LEN.load(Ordering::Relaxed);
+                let text_bytes = text.as_bytes();
+                if text_bytes.len() > prev_len {
+                    let delta = &text[prev_len..];
+                    if !delta.is_empty() {
+                        sink.push(SubtitleEvent::Partial(delta.to_string()));
+                    }
                 }
+                LAST_TEXT_LEN.store(text_bytes.len(), Ordering::Relaxed);
             }
-            QwenEvent::ResponseTextDone { text } => {
-                if !text.is_empty() {
-                    sink.push(SubtitleEvent::Final(text.trim().to_string()));
-                }
-            }
-            QwenEvent::TranscriptionDelta { text } => {
-                if !text.is_empty() {
-                    sink.push(SubtitleEvent::Partial(text.clone()));
-                }
-            }
-            QwenEvent::Completed { transcript, .. } => {
-                if !transcript.trim().is_empty() {
-                    sink.push(SubtitleEvent::Final(transcript.trim().to_string()));
-                }
-            }
-            QwenEvent::Error { error } => {
-                warn!(?error, "qwen error event");
-            }
-            _ => {}
         }
-    }
+        QwenEvent::ResponseTextDone { text } => {
+            LAST_TEXT_LEN.store(0, Ordering::Relaxed);
+            if !text.is_empty() {
+                sink.push(SubtitleEvent::Final(text.trim().to_string()));
+            }
+        }
+        QwenEvent::TranscriptionDelta { text } => {
+            if !text.is_empty() {
+                sink.push(SubtitleEvent::Partial(text.clone()));
+            }
+        }
+        QwenEvent::Completed { transcript, .. } => {
+            LAST_TEXT_LEN.store(0, Ordering::Relaxed);
+            if !transcript.trim().is_empty() {
+                sink.push(SubtitleEvent::Final(transcript.trim().to_string()));
+            }
+        }
+        QwenEvent::Error { error } => {
+            warn!(?error, "qwen error event");
+        }
+        _ => {}
+      }
+   }
 }
 
 // ---------- OpenAI realtime ----------

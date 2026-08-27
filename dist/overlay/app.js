@@ -2,13 +2,10 @@
 //   * Connects to /ws/subtitles to receive live partial + final events.
 //   * Renders a single caption line with a typewriter / fade / slide
 //     animation depending on the body class.
-//   * Reads style overrides from the URL hash: #color=%23ff0&size=56...
+//   * Reads style from /api/config first, then URL hash overrides.
 
 (function () {
   "use strict";
-
-  const wsScheme = location.protocol === "https:" ? "wss" : "ws";
-  const ws = new WebSocket(`${wsScheme}://${location.host}/ws/subtitles`);
 
   const captionEl = document.getElementById("caption");
   const lineEl = document.getElementById("caption-line");
@@ -17,8 +14,8 @@
   let hideTimer = null;
   let partialBuffer = "";
   let lastPartialAt = 0;
+  let ws = null;
 
-  // Watermark/filler words to filter
   const WATERMARK_WORDS = [
     "字幕", "subtitle", "翻译", "translate", "实时", "real-time", "live",
     "AI", "人工智能", "智能翻译", "同声传译", "直播", "stream"
@@ -53,64 +50,79 @@
     return false;
   }
 
+  function hexToRgba(hex, alpha) {
+    if (!hex || !hex.startsWith("#")) return null;
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+
+  function applyOverlayConfig(ov) {
+    if (!ov) return;
+    const root = document.documentElement.style;
+    if (ov.font_size) root.setProperty("--caption-size", ov.font_size + "px");
+    if (ov.font_color) root.setProperty("--caption-color", ov.font_color);
+    if (ov.background_color) {
+      const alpha = ov.bg_opacity !== undefined ? (ov.bg_opacity / 100) : 0.75;
+      const rgba = hexToRgba(ov.background_color, alpha);
+      if (rgba) root.setProperty("--caption-bg", rgba);
+    } else if (ov.bg_opacity !== undefined) {
+      root.setProperty("--caption-bg", `rgba(0,0,0,${ov.bg_opacity / 100})`);
+    }
+    if (ov.bg_width && ov.bg_width > 0) root.setProperty("--caption-width", ov.bg_width + "px");
+    if (ov.bg_height && ov.bg_height > 0) root.setProperty("--caption-height", ov.bg_height + "px");
+    if (ov.border_radius) root.setProperty("--caption-radius", ov.border_radius + "px");
+    if (ov.position) {
+      document.body.className = document.body.className.replace(/position-\w+/g, "");
+      document.body.classList.add("position-" + ov.position);
+    }
+    if (ov.animation) {
+      document.body.className = document.body.className.replace(/animation-\w+/g, "");
+      document.body.classList.add("animation-" + ov.animation);
+    }
+    if (ov.layout) {
+      document.body.className = document.body.className.replace(/layout-\w+/g, "");
+      document.body.classList.add("layout-" + ov.layout);
+    }
+  }
+
   function parseHash() {
     const hash = location.hash.replace(/^#/, "");
     if (!hash) return;
     const params = new URLSearchParams(hash);
-    const color = params.get("color");
-    if (color) {
-      document.documentElement.style.setProperty("--caption-color", color);
-    }
+    const root = document.documentElement.style;
+    if (params.get("color")) root.setProperty("--caption-color", params.get("color"));
+    if (params.get("size")) root.setProperty("--caption-size", params.get("size") + "px");
     const bg = params.get("bg");
     const bgOpacity = params.get("bgOpacity");
     if (bg) {
-      // Parse the color and apply opacity
       const alpha = bgOpacity ? (parseInt(bgOpacity, 10) / 100) : 0.75;
-      if (bg.startsWith("#")) {
-        const r = parseInt(bg.slice(1, 3), 16);
-        const g = parseInt(bg.slice(3, 5), 16);
-        const b = parseInt(bg.slice(5, 7), 16);
-        document.documentElement.style.setProperty("--caption-bg", `rgba(${r},${g},${b},${alpha})`);
-      } else {
-        document.documentElement.style.setProperty("--caption-bg", bg);
-      }
+      const rgba = hexToRgba(bg, alpha);
+      if (rgba) root.setProperty("--caption-bg", rgba);
+      else root.setProperty("--caption-bg", bg);
     } else if (bgOpacity) {
-      const alpha = parseInt(bgOpacity, 10) / 100;
-      document.documentElement.style.setProperty("--caption-bg", `rgba(0,0,0,${alpha})`);
+      root.setProperty("--caption-bg", `rgba(0,0,0,${parseInt(bgOpacity, 10) / 100})`);
     }
-    const size = params.get("size");
-    if (size) {
-      document.documentElement.style.setProperty("--caption-size", size + "px");
-    }
-    const bgWidth = params.get("bgWidth");
-    if (bgWidth && bgWidth !== "0") {
-      document.documentElement.style.setProperty("--caption-width", bgWidth + "px");
-    }
-    const bgHeight = params.get("bgHeight");
-    if (bgHeight && bgHeight !== "0") {
-      document.documentElement.style.setProperty("--caption-height", bgHeight + "px");
-    }
-    const radius = params.get("radius");
-    if (radius) {
-      document.documentElement.style.setProperty("--caption-radius", radius + "px");
-    }
+    if (params.get("bgWidth") && params.get("bgWidth") !== "0") root.setProperty("--caption-width", params.get("bgWidth") + "px");
+    if (params.get("bgHeight") && params.get("bgHeight") !== "0") root.setProperty("--caption-height", params.get("bgHeight") + "px");
+    if (params.get("radius")) root.setProperty("--caption-radius", params.get("radius") + "px");
     if (params.get("position")) {
       document.body.className = document.body.className.replace(/position-\w+/g, "");
       document.body.classList.add("position-" + params.get("position"));
-    }
-    if (params.get("layout")) {
-      document.body.className = document.body.className.replace(/layout-\w+/g, "");
-      document.body.classList.add("layout-" + params.get("layout"));
     }
     if (params.get("animation")) {
       document.body.className = document.body.className.replace(/animation-\w+/g, "");
       document.body.classList.add("animation-" + params.get("animation"));
     }
+    if (params.get("layout")) {
+      document.body.className = document.body.className.replace(/layout-\w+/g, "");
+      document.body.classList.add("layout-" + params.get("layout"));
+    }
   }
 
   function show(text) {
     if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
-    // Force single line - truncate if too long
     const singleLine = text.length > 200 ? text.slice(0, 200) + "…" : text;
     lineEl.textContent = singleLine;
     currentText = singleLine;
@@ -146,7 +158,6 @@
       partialBuffer = "";
       scheduleHide();
     } else {
-      // Skip duplicate, hide immediately
       if (hideTimer) clearTimeout(hideTimer);
       captionEl.classList.add("empty");
       captionEl.classList.remove("show");
@@ -165,31 +176,43 @@
     recentSentences.length = 0;
   }
 
-  ws.addEventListener("open", () => {
-    console.log("overlay ws connected");
-  });
-
-  ws.addEventListener("message", (ev) => {
-    let payload;
-    try { payload = JSON.parse(ev.data); } catch { return; }
-    if (payload.type === "current" && payload.line) {
-      const cleaned = cleanText(payload.line.text || "");
-      if (cleaned && !isDuplicate(cleaned)) {
-        show(cleaned);
-        scheduleHide();
+  function connectWS() {
+    const wsScheme = location.protocol === "https:" ? "wss" : "ws";
+    ws = new WebSocket(`${wsScheme}://${location.host}/ws/subtitles`);
+    ws.addEventListener("open", () => { console.log("overlay ws connected"); });
+    ws.addEventListener("message", (ev) => {
+      let payload;
+      try { payload = JSON.parse(ev.data); } catch { return; }
+      if (payload.type === "current" && payload.line) {
+        const cleaned = cleanText(payload.line.text || "");
+        if (cleaned && !isDuplicate(cleaned)) {
+          show(cleaned);
+          scheduleHide();
+        }
+      } else if (payload.type === "partial") {
+        appendPartial(payload.text || "");
+      } else if (payload.type === "final") {
+        finalize(payload.text || "");
+      } else if (payload.type === "cleared") {
+        clearAll();
       }
-    } else if (payload.type === "partial") {
-      appendPartial(payload.text || "");
-    } else if (payload.type === "final") {
-      finalize(payload.text || "");
-    } else if (payload.type === "cleared") {
-      clearAll();
+    });
+    ws.addEventListener("close", () => {
+      setTimeout(connectWS, 2000);
+    });
+  }
+
+  async function init() {
+    try {
+      const r = await fetch("/api/config");
+      const cfg = await r.json();
+      if (cfg.overlay) applyOverlayConfig(cfg.overlay);
+    } catch (e) {
+      console.warn("overlay: failed to load config from API, using defaults", e);
     }
-  });
+    parseHash();
+    connectWS();
+  }
 
-  ws.addEventListener("close", () => {
-    setTimeout(() => location.reload(), 2000);
-  });
-
-  parseHash();
+  init();
 })();
