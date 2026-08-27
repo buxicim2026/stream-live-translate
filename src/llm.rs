@@ -317,8 +317,8 @@ pub mod qwen {
             warn!(?error, "qwen error event");
         }
         _ => {}
-      }
-   }
+    }
+  }
 }
 
 // ---------- OpenAI realtime ----------
