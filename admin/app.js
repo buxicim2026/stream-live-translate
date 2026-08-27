@@ -187,6 +187,8 @@
     $("ov-bg-width").value = cfg.overlay.bg_width || 0;
     $("ov-bg-height").value = cfg.overlay.bg_height || 0;
     $("ov-border-radius").value = cfg.overlay.border_radius || 8;
+    $("ov-bg-opacity").value = cfg.overlay.bg_opacity !== undefined ? cfg.overlay.bg_opacity : 75;
+    $("ov-opacity-display").textContent = (cfg.overlay.bg_opacity !== undefined ? cfg.overlay.bg_opacity : 75) + "%";
     $("ov-color").value = cfg.overlay.font_color || "#ffffff";
     $("ov-bg").value = cfg.overlay.background_color || "#000000";
     $("ov-position").value = cfg.overlay.position || "bottom";
@@ -263,9 +265,10 @@
       },
       overlay: {
         font_size: parseInt($("ov-size").value, 10) || 48,
-        bg_width: parseInt($("ov-bg-width").value, 10) || 0,
-        bg_height: parseInt($("ov-bg-height").value, 10) || 0,
-        border_radius: parseInt($("ov-border-radius").value, 10) || 8,
+        bg_width: Math.max(0, parseInt($("ov-bg-width").value, 10) || 0),
+        bg_height: Math.max(0, parseInt($("ov-bg-height").value, 10) || 0),
+        border_radius: Math.max(0, parseInt($("ov-border-radius").value, 10) || 8),
+        bg_opacity: parseInt($("ov-bg-opacity").value, 10) || 75,
         font_color: $("ov-color").value,
         background_color: $("ov-bg").value,
         position: $("ov-position").value,
@@ -281,6 +284,7 @@
     if (cfg.overlay.font_size) params.set("size", cfg.overlay.font_size);
     if (cfg.overlay.font_color) params.set("color", encodeURIComponent(cfg.overlay.font_color));
     if (cfg.overlay.background_color) params.set("bg", encodeURIComponent(cfg.overlay.background_color));
+    if (cfg.overlay.bg_opacity !== undefined) params.set("bgOpacity", cfg.overlay.bg_opacity);
     if (cfg.overlay.position) params.set("position", cfg.overlay.position);
     if (cfg.overlay.animation) params.set("animation", cfg.overlay.animation);
     if (cfg.overlay.bg_width) params.set("bgWidth", cfg.overlay.bg_width);
@@ -424,6 +428,9 @@
 
   // Wire up events.
   $("provider-type").addEventListener("change", updateProviderUI);
+  $("ov-bg-opacity").addEventListener("input", (e) => {
+    $("ov-opacity-display").textContent = e.target.value + "%";
+  });
   $("save-btn").addEventListener("click", async () => {
     const patch = collectPatch();
     const key = patch.llm.api_key.trim();

@@ -62,8 +62,21 @@
       document.documentElement.style.setProperty("--caption-color", color);
     }
     const bg = params.get("bg");
+    const bgOpacity = params.get("bgOpacity");
     if (bg) {
-      document.documentElement.style.setProperty("--caption-bg", bg);
+      // Parse the color and apply opacity
+      const alpha = bgOpacity ? (parseInt(bgOpacity, 10) / 100) : 0.75;
+      if (bg.startsWith("#")) {
+        const r = parseInt(bg.slice(1, 3), 16);
+        const g = parseInt(bg.slice(3, 5), 16);
+        const b = parseInt(bg.slice(5, 7), 16);
+        document.documentElement.style.setProperty("--caption-bg", `rgba(${r},${g},${b},${alpha})`);
+      } else {
+        document.documentElement.style.setProperty("--caption-bg", bg);
+      }
+    } else if (bgOpacity) {
+      const alpha = parseInt(bgOpacity, 10) / 100;
+      document.documentElement.style.setProperty("--caption-bg", `rgba(0,0,0,${alpha})`);
     }
     const size = params.get("size");
     if (size) {

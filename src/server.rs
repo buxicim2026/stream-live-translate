@@ -380,6 +380,8 @@ async fn restart_pipeline(State(state): State<Arc<AppState>>) -> Response {
     // spin up a fresh pipeline with the current config. shutdown() is
     // permanent and reserved for process exit.
     state.pipeline.restart().await;
+    // Broadcast Cleared to all WebSocket clients so overlays clear their state.
+    state.subtitle.clear();
     axum::Json(serde_json::json!({"ok": true})).into_response()
 }
 

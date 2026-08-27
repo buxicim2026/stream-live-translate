@@ -118,21 +118,25 @@
         <input id="ov-size" type="number" value="48" />
       </label>
       <label>背景尺寸（px）
-        <div class="size-row">
-          <div>
-            <span class="size-label">宽度</span>
-            <input id="ov-bg-width" type="number" value="0" placeholder="0=自动" />
+          <div class="size-row">
+            <div>
+              <span class="size-label">宽度</span>
+              <input id="ov-bg-width" type="number" value="0" placeholder="0=自动" min="0" />
+            </div>
+            <div>
+              <span class="size-label">高度</span>
+              <input id="ov-bg-height" type="number" value="0" placeholder="0=自动" min="0" />
+            </div>
+            <div>
+              <span class="size-label">圆角</span>
+              <input id="ov-border-radius" type="number" value="8" min="0" />
+            </div>
           </div>
-          <div>
-            <span class="size-label">高度</span>
-            <input id="ov-bg-height" type="number" value="0" placeholder="0=自动" />
-          </div>
-          <div>
-            <span class="size-label">圆角</span>
-            <input id="ov-border-radius" type="number" value="8" />
-          </div>
-        </div>
-      </label>
+        </label>
+        <label>背景透明度
+          <input id="ov-bg-opacity" type="range" min="0" max="100" value="75" />
+          <span id="ov-opacity-display">75%</span>
+        </label>
       <label>颜色
         <input id="ov-color" type="color" value="#ffffff" />
       </label>
@@ -180,7 +184,7 @@
     </section>
 
     <section class="card wide">
-      <h2>6. 历史</h2>
+      <h2>6. 翻译结果历史</h2>
       <div id="history" class="history"></div>
     </section>
   </main>

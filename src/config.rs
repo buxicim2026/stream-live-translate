@@ -122,11 +122,17 @@ pub struct OverlayConfig {
     pub background_color: String,
     pub background_opacity: f32,
     /// Background width in pixels. 0 = auto (fit content).
+    #[serde(default)]
     pub bg_width: u32,
     /// Background height in pixels. 0 = auto (fit content).
+    #[serde(default)]
     pub bg_height: u32,
     /// Background border radius in pixels.
+    #[serde(default)]
     pub border_radius: u32,
+    /// Background opacity 0-100.
+    #[serde(default)]
+    pub bg_opacity: u32,
     /// `bottom` / `top` / `middle`
     pub position: String,
     /// `single` / `double`
