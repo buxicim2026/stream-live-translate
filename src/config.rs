@@ -191,6 +191,7 @@ impl Default for Config {
                 bg_width: 0,
                 bg_height: 0,
                 border_radius: 8,
+                bg_opacity: 75,
                 position: "bottom".into(),
                 layout: "single".into(),
                 animation: "typewriter".into(),
