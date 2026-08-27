@@ -1,141 +1,133 @@
-name: release
+name: Release
 
-# Triggers:
-#   1. push a tag matching "v*"  -> build all platforms and publish to Releases
-#   2. workflow_dispatch          -> manual build for sanity-check (artifacts only)
 on:
   push:
-    tags: ["v*"]
-  workflow_dispatch:
+    tags:
+      - 'v*'
 
 permissions:
   contents: write
 
 jobs:
-  build:
-    name: build (${{ matrix.target }})
-    runs-on: ${{ matrix.os }}
-    container: ${{ matrix.container }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-22.04
-            container: ubuntu:20.04
-            out: linux-x64
-            archive: tar.gz
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-            out: windows-x64
-            archive: zip
-          - target: aarch64-apple-darwin
-            os: macos-latest
-            out: macos-arm64
-            archive: tar.gz
-
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create_release.outputs.id }}
     steps:
-      - name: Prepare Linux container
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          export DEBIAN_FRONTEND=noninteractive
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            ca-certificates curl git build-essential pkg-config
-
       - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-
-      - name: Install Linux x64 build deps (alsa headers)
-        if: matrix.target == 'x86_64-unknown-linux-gnu'
-        shell: bash
-        run: |
-          export DEBIAN_FRONTEND=noninteractive
-          apt-get update
-          apt-get install -y --no-install-recommends libasound2-dev libssl-dev
-
-      - name: Cargo check (faster error feedback)
-        shell: bash
-        run: cargo check --target ${{ matrix.target }}
-
-      - name: Build (release)
-        shell: bash
-        run: cargo build --release --target ${{ matrix.target }}
-
-      - name: Package single-file release
-        shell: bash
-        run: |
-          set -euo pipefail
-          out="release/${{ matrix.out }}"
-          rm -rf "$out"
-          mkdir -p "$out"
-
-          ext=""
-          case "${{ matrix.target }}" in
-            *windows*) ext=".exe" ;;
-          esac
-
-          binary="target/${{ matrix.target }}/release/stream-live-translate${ext}"
-          cp "$binary" "$out/"
-          chmod +x "$out/stream-live-translate${ext}"
-
-          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
-            printf '%s\n' \
-              "stream-live-translate - single-file build" \
-              "" \
-              "Run from anywhere:    ./stream-live-translate" \
-              "Config lives next to this binary as 'config.toml'." \
-              "" \
-              "Debian / Ubuntu system dependency (audio loopback):" \
-              "    sudo apt-get install -y libasound2 ffmpeg" \
-              "" \
-              "Then open http://127.0.0.1:8787/admin in any browser" \
-              "(or click the 'StreamLiveTranslateAdmin' source in OBS to" \
-              "configure the plugin in-OBS)." \
-              > "$out/README.txt"
-          fi
-
-          cd release
-          archive_file="${{ matrix.out }}.${{ matrix.archive }}"
-          if [ "${{ matrix.archive }}" = "zip" ]; then
-            if command -v zip >/dev/null 2>&1; then
-              (cd "${{ matrix.out }}" && zip -r "../$archive_file" . >/dev/null)
-            else
-              # Windows Git Bash ships no zip(1); fall back to PowerShell.
-              powershell.exe -NoProfile -Command "Compress-Archive -Path '${{ matrix.out }}/*' -DestinationPath '$archive_file' -Force"
-            fi
-          else
-            tar -czf "$archive_file" "${{ matrix.out }}"
-          fi
-
-          sha256sum "$archive_file" > "$archive_file.sha256"
-          ls -l "$archive_file" "$archive_file.sha256"
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: stream-live-translate-${{ matrix.out }}
-          path: |
-            release/${{ matrix.out }}.${{ matrix.archive }}
-            release/${{ matrix.out }}.${{ matrix.archive }}.sha256
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+      - name: Parse tag
+        id: tag
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ github.ref_name }}
-          generate_release_notes: true
-          fail_on_unmatched_files: true
-          files: |
-            release/${{ matrix.out }}.${{ matrix.archive }}
-            release/${{ matrix.out }}.${{ matrix.archive }}.sha256
+          release_name: v${{ steps.tag.outputs.version }}
+          draft: false
+          prerelease: false
+
+  build-windows:
+    needs: create-release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      
+      - name: Build
+        run: cargo build --release --target x86_64-pc-windows-msvc
+      
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          cp target/x86_64-pc-windows-msvc/release/stream-live-translate.exe artifacts/
+          cd artifacts
+          powershell -Command "Compress-Archive -Path 'stream-live-translate.exe' -DestinationPath 'stream-live-translate-windows-x86_64-v${{ github.ref_name }}.zip'"
+      
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: artifacts/stream-live-translate-windows-x86_64-v${{ github.ref_name }}.zip
+          asset_name: stream-live-translate-windows-x86_64-v${{ github.ref_name }}.zip
+          asset_content_type: application/zip
+
+  build-macos:
+    needs: create-release
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+      
+      - name: Build Intel
+        run: cargo build --release --target x86_64-apple-darwin
+      
+      - name: Build Apple Silicon
+        run: cargo build --release --target aarch64-apple-darwin
+      
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          cp target/x86_64-apple-darwin/release/stream-live-translate artifacts/stream-live-translate-x86_64
+          cp target/aarch64-apple-darwin/release/stream-live-translate artifacts/stream-live-translate-aarch64
+          cd artifacts
+          tar -czvf stream-live-translate-macos-v${{ github.ref_name }}.tar.gz *
+      
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: artifacts/stream-live-translate-macos-v${{ github.ref_name }}.tar.gz
+          asset_name: stream-live-translate-macos-v${{ github.ref_name }}.tar.gz
+          asset_content_type: application/gzip
+
+  build-linux:
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+      
+      - name: Build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev pkg-config
+          cargo build --release --target x86_64-unknown-linux-gnu
+      
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          cp target/x86_64-unknown-linux-gnu/release/stream-live-translate artifacts/
+          cd artifacts
+          tar -czvf stream-live-translate-linux-x86_64-v${{ github.ref_name }}.tar.gz *
+      
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: artifacts/stream-live-translate-linux-x86_64-v${{ github.ref_name }}.tar.gz
+          asset_name: stream-live-translate-linux-x86_64-v${{ github.ref_name }}.tar.gz
+          asset_content_type: application/gzip
