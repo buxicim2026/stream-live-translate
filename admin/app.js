@@ -15,9 +15,73 @@
 
   let currentConfig = null;
   let pendingPartial = "";
+  let lastFinalText = "";
   let toastTimer = null;
 
-  // Big, unmissable feedback for save/test actions.
+  // Common watermark/filler words to filter out
+  const WATERMARK_WORDS = [
+    "字幕", "subtitle", "翻译", "translate", "实时", "real-time", "live",
+    "AI", "人工智能", "智能翻译", "同声传译", "直播", "stream"
+  ];
+
+  // Debounce duplicate filter - cache recent sentences
+  const recentSentences = [];
+  const MAX_RECENT = 5;
+
+  function cleanText(text) {
+    if (!text) return "";
+    let cleaned = text.trim();
+    
+    // Remove watermark words if they appear as standalone segments
+    for (const word of WATERMARK_WORDS) {
+      const regex = new RegExp(`^${word}[\\s,.，、.]*|[\\s,.，、.]*${word}$|^${word}$`, 'gi');
+      cleaned = cleaned.replace(regex, '');
+    }
+    
+    // Remove repeated characters (more than 3 same chars)
+    cleaned = cleaned.replace(/(.)\1{3,}/g, '$1$1$1');
+    
+    // Remove multiple spaces
+    cleaned = cleaned.replace(/\s+/g, ' ');
+    
+    return cleaned.trim();
+  }
+
+  function isDuplicate(text) {
+    const cleaned = cleanText(text);
+    if (!cleaned || cleaned.length < 3) return true;
+    
+    // Check against recent sentences
+    for (const recent of recentSentences) {
+      // If more than 70% similarity, consider duplicate
+      const similarity = calculateSimilarity(cleaned, recent);
+      if (similarity > 0.7) return true;
+    }
+    
+    // Add to recent
+    recentSentences.push(cleaned);
+    if (recentSentences.length > MAX_RECENT) {
+      recentSentences.shift();
+    }
+    
+    return false;
+  }
+
+  function calculateSimilarity(a, b) {
+    if (!a || !b) return 0;
+    const longer = a.length > b.length ? a : b;
+    const shorter = a.length > b.length ? b : a;
+    if (longer.length === 0) return 1;
+    
+    // Simple word-based similarity
+    const aWords = new Set(a.toLowerCase().split(/\s+/));
+    const bWords = new Set(b.toLowerCase().split(/\s+/));
+    const intersection = [...aWords].filter(x => bWords.has(x));
+    
+    return intersection.length / aWords.size;
+  }
+
+  // Toast feedback
   function toast(msg, kind) {
     const el = $("toast");
     el.textContent = msg;
@@ -49,7 +113,7 @@
       ],
       endpointPlaceholder: "留空使用内置默认地址（wss://dashscope.aliyuncs.com/api-ws/v1/realtime）",
       endpointDefault: "",
-      className: "qwen"
+      className: "qwen-hint"
     },
     "online": {
       hint: "支持 OpenAI 兼容的 Realtime WebSocket 接口，包括 GPT、Gemini、火山引擎、讯飞等在线 API。Base URL 填对应的 WebSocket 地址（wss://...）。",
@@ -61,7 +125,7 @@
       ],
       endpointPlaceholder: "例如：wss://api.openai.com/v1/realtime",
       endpointDefault: "wss://api.openai.com/v1/realtime",
-      className: "online"
+      className: "online-hint"
     },
     "local": {
       hint: "支持本机部署的兼容 API（如 Ollama、LocalAI 等）。Base URL 填本机地址，例如：ws://localhost:11434/v1/realtime",
@@ -72,7 +136,7 @@
       ],
       endpointPlaceholder: "例如：ws://localhost:11434/v1/realtime",
       endpointDefault: "ws://localhost:11434/v1/realtime",
-      className: "local"
+      className: "local-hint"
     },
     "mock": {
       hint: "本地模拟输出，不联网、不消耗额度，仅用于界面测试。",
@@ -80,7 +144,7 @@
       modelSuggestions: [],
       endpointPlaceholder: "无需填写",
       endpointDefault: "",
-      className: "qwen"
+      className: "qwen-hint"
     }
   };
 
@@ -90,7 +154,6 @@
     if (cfg.llm.provider === "qwen-realtime") providerType = "qwen";
     else if (cfg.llm.provider === "mock") providerType = "mock";
     else if (cfg.llm.provider === "openai-realtime") {
-      // Guess type from endpoint
       const ep = cfg.llm.endpoint || "";
       if (ep.includes("localhost") || ep.includes("127.0.0.1")) {
         providerType = "local";
@@ -103,11 +166,10 @@
     $("model").value = cfg.llm.model;
     $("api_key").value = cfg.llm.api_key;
     $("endpoint").value = cfg.llm.endpoint || "";
-    $("target_lang").value = cfg.llm.target_lang;
+    $("target_lang").value = cfg.llm.target_lang || "zh";
     $("translate_chinese").checked = cfg.llm.translate_chinese;
 
-    // Defensive: if the config's mode isn't among the options (old cached
-    // page), add it so saving can never silently switch the mode.
+    // Defensive: if the config's mode isn't among the options
     const modeSel = $("audio-mode");
     if (![...modeSel.options].some((o) => o.value === cfg.audio.mode)) {
       const opt = document.createElement("option");
@@ -121,11 +183,14 @@
     $("obs-host").value = cfg.obs.host;
     $("obs-port").value = cfg.obs.port;
     $("obs-password").value = cfg.obs.password;
-    $("ov-size").value = cfg.overlay.font_size;
-    $("ov-color").value = cfg.overlay.font_color;
-    $("ov-bg").value = cfg.overlay.background_color;
-    $("ov-position").value = cfg.overlay.position;
-    $("ov-animation").value = cfg.overlay.animation;
+    $("ov-size").value = cfg.overlay.font_size || 48;
+    $("ov-bg-width").value = cfg.overlay.bg_width || 0;
+    $("ov-bg-height").value = cfg.overlay.bg_height || 0;
+    $("ov-border-radius").value = cfg.overlay.border_radius || 8;
+    $("ov-color").value = cfg.overlay.font_color || "#ffffff";
+    $("ov-bg").value = cfg.overlay.background_color || "#000000";
+    $("ov-position").value = cfg.overlay.position || "bottom";
+    $("ov-animation").value = cfg.overlay.animation || "typewriter";
     $("obs-dock-url").textContent =
       `${location.protocol}//${location.host}/admin?obsDock=1`;
 
@@ -198,6 +263,9 @@
       },
       overlay: {
         font_size: parseInt($("ov-size").value, 10) || 48,
+        bg_width: parseInt($("ov-bg-width").value, 10) || 0,
+        bg_height: parseInt($("ov-bg-height").value, 10) || 0,
+        border_radius: parseInt($("ov-border-radius").value, 10) || 8,
         font_color: $("ov-color").value,
         background_color: $("ov-bg").value,
         position: $("ov-position").value,
@@ -206,11 +274,36 @@
     };
   }
 
+  function buildOverlayUrl(cfg) {
+    const proto = location.protocol === "https:" ? "https:" : "http:";
+    const host = location.host;
+    const params = new URLSearchParams();
+    if (cfg.overlay.font_size) params.set("size", cfg.overlay.font_size);
+    if (cfg.overlay.font_color) params.set("color", encodeURIComponent(cfg.overlay.font_color));
+    if (cfg.overlay.background_color) params.set("bg", encodeURIComponent(cfg.overlay.background_color));
+    if (cfg.overlay.position) params.set("position", cfg.overlay.position);
+    if (cfg.overlay.animation) params.set("animation", cfg.overlay.animation);
+    if (cfg.overlay.bg_width) params.set("bgWidth", cfg.overlay.bg_width);
+    if (cfg.overlay.bg_height) params.set("bgHeight", cfg.overlay.bg_height);
+    if (cfg.overlay.border_radius) params.set("radius", cfg.overlay.border_radius);
+    const hash = params.toString();
+    return `${proto}//${host}/overlay${hash ? '#' + hash : ''}`;
+  }
+
+  function showOverlayUrl() {
+    const box = $("overlay-url-box");
+    const input = $("overlay-url");
+    if (!box || !input || !currentConfig) return;
+    input.value = buildOverlayUrl(currentConfig);
+    box.hidden = false;
+  }
+
   async function loadConfig() {
     const r = await fetch("/api/config");
     const cfg = await r.json();
     currentConfig = cfg;
     fillForm(cfg);
+    showOverlayUrl();
   }
 
   async function loadDevices() {
@@ -250,7 +343,6 @@
       set("dot-audio", s.audio_active, false);
       set("dot-llm", s.llm_connected, s.running && !s.last_error ? true : false);
       set("dot-obs", s.obs_connected, false);
-      // Prominent "is it actually running?" indicator in the top bar.
       const run = $("run-state");
       if (s.running) {
         run.textContent = "● 管线运行中";
@@ -259,8 +351,6 @@
         run.textContent = "● 管线未运行";
         run.className = "run-state bad";
       }
-      // Surface the engine's last error + where the config is persisted, so
-      // users can tell whether saving actually took effect.
       const errEl = $("engine-error");
       errEl.classList.remove("good");
       if (s.last_error) {
@@ -280,8 +370,6 @@
       if (s.config_path) {
         $("config-path").textContent = "配置文件：" + s.config_path;
       }
-      // Plugin mode locks the audio mode selector (engine launched with
-      // --audio-mode obs_filter); the backend enforces it too.
       const modeSel = $("audio-mode");
       const lock = $("audio-mode-lock");
       if (s.audio_mode_forced) {
@@ -330,6 +418,8 @@
   function clearPreview() {
     $("preview-line").textContent = "";
     $("preview-caption").classList.add("empty");
+    lastFinalText = "";
+    recentSentences.length = 0;
   }
 
   // Wire up events.
@@ -338,7 +428,6 @@
     const patch = collectPatch();
     const key = patch.llm.api_key.trim();
 
-    // Validation
     if (patch.llm.provider !== "mock") {
       if (!key) {
         toast("请先填写 API Key", "error");
@@ -352,7 +441,6 @@
 
     const providerType = $("provider-type").value;
 
-    // Qwen-specific validation
     if (providerType === "qwen") {
       if (patch.llm.endpoint && /compatible-mode|http:|https:/i.test(patch.llm.endpoint)) {
         toast("Base URL 不正确：DashScope Realtime 需要 WebSocket 地址（wss://...），建议留空使用内置默认", "error");
@@ -360,7 +448,6 @@
       }
     }
 
-    // Online API validation
     if (providerType === "online") {
       const ep = patch.llm.endpoint?.trim() || "";
       if (ep && !/^wss?:/i.test(ep)) {
@@ -369,7 +456,6 @@
       }
     }
 
-    // Local API validation
     if (providerType === "local") {
       const ep = patch.llm.endpoint?.trim() || "";
       if (!ep) {
@@ -398,6 +484,7 @@
         return;
       }
       await loadConfig();
+      showOverlayUrl();
       const saved = currentConfig && currentConfig.llm.api_key === patch.llm.api_key
         && currentConfig.llm.model === patch.llm.model;
       if (saved) {
@@ -432,15 +519,28 @@
       let p;
       try { p = JSON.parse(ev.data); } catch { return; }
       if (p.type === "current" && p.line) {
-        pendingPartial = p.line.text || "";
-        showPreview(pendingPartial);
+        const cleaned = cleanText(p.line.text || "");
+        if (cleaned && !isDuplicate(cleaned)) {
+          pendingPartial = cleaned;
+          showPreview(pendingPartial);
+        }
       } else if (p.type === "partial") {
-        pendingPartial += p.text || "";
-        showPreview(pendingPartial);
+        const cleaned = cleanText(p.text || "");
+        if (cleaned) {
+          pendingPartial += cleaned;
+          // Show partial if it's different enough from last final
+          if (!isDuplicate(pendingPartial)) {
+            showPreview(pendingPartial);
+          }
+        }
       } else if (p.type === "final") {
-        pendingPartial = p.text || "";
-        showPreview(pendingPartial);
-        loadHistory();
+        const cleaned = cleanText(p.text || "");
+        if (cleaned && !isDuplicate(cleaned)) {
+          pendingPartial = cleaned;
+          lastFinalText = cleaned;
+          showPreview(pendingPartial);
+          loadHistory();
+        }
       } else if (p.type === "cleared") {
         pendingPartial = "";
         clearPreview();

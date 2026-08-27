@@ -121,6 +121,12 @@ pub struct OverlayConfig {
     pub font_color: String,
     pub background_color: String,
     pub background_opacity: f32,
+    /// Background width in pixels. 0 = auto (fit content).
+    pub bg_width: u32,
+    /// Background height in pixels. 0 = auto (fit content).
+    pub bg_height: u32,
+    /// Background border radius in pixels.
+    pub border_radius: u32,
     /// `bottom` / `top` / `middle`
     pub position: String,
     /// `single` / `double`
@@ -176,6 +182,9 @@ impl Default for Config {
                 font_color: "#FFFFFF".into(),
                 background_color: "#000000".into(),
                 background_opacity: 0.55,
+                bg_width: 0,
+                bg_height: 0,
+                border_radius: 8,
                 position: "bottom".into(),
                 layout: "single".into(),
                 animation: "typewriter".into(),
