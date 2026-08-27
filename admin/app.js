@@ -562,4 +562,18 @@
   setInterval(loadStatus, 1500);
   setInterval(loadHistory, 5000);
   connectWS();
+
+  // Theme toggle
+  const themeBtn = $("theme-toggle");
+  const savedTheme = localStorage.getItem("slt-theme");
+  if (savedTheme === "light") {
+    document.body.classList.add("light");
+    themeBtn.textContent = "☀️";
+  }
+  themeBtn.addEventListener("click", () => {
+    document.body.classList.toggle("light");
+    const isLight = document.body.classList.contains("light");
+    themeBtn.textContent = isLight ? "☀️" : "🌙";
+    localStorage.setItem("slt-theme", isLight ? "light" : "dark");
+  });
 })();
