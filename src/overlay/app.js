@@ -89,13 +89,17 @@
     if (!hash) return;
     const params = new URLSearchParams(hash);
     const root = document.documentElement.style;
-    if (params.get("color")) root.setProperty("--caption-color", params.get("color"));
+    if (params.get("color")) {
+      const color = decodeURIComponent(params.get("color"));
+      root.setProperty("--caption-color", color);
+    }
     if (params.get("size")) root.setProperty("--caption-size", params.get("size") + "px");
     const bg = params.get("bg");
     const bgOpacity = params.get("bgOpacity");
     if (bg) {
+      const decodedBg = decodeURIComponent(bg);
       const alpha = bgOpacity ? (parseInt(bgOpacity, 10) / 100) : 0.75;
-      const rgba = hexToRgba(bg, alpha);
+      const rgba = hexToRgba(decodedBg, alpha);
       root.setProperty("--caption-bg", rgba || `rgba(0,0,0,${alpha})`);
     } else if (bgOpacity) {
       root.setProperty("--caption-bg", `rgba(0,0,0,${parseInt(bgOpacity, 10) / 100})`);

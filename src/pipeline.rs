@@ -134,6 +134,7 @@ async fn watch(state: &Arc<AppState>, handle: &Arc<PipelineHandle>) {
     let mut last_endpoint = state.config.read().llm.endpoint.clone();
     let mut last_audio_mode = state.config.read().audio.mode.clone();
     let mut last_device = state.config.read().audio.device.clone();
+    let mut last_audio_active = state.status.read().audio_active;
     let mut ticker = tokio::time::interval(Duration::from_secs(2));
     loop {
         ticker.tick().await;
@@ -162,6 +163,18 @@ async fn watch(state: &Arc<AppState>, handle: &Arc<PipelineHandle>) {
             tokio::time::sleep(Duration::from_millis(250)).await;
             return;
         }
+        // Detect audio stream disconnect (e.g., paused live stream in OBS).
+        // When audio goes from active to inactive, we should restart the pipeline
+        // so it can reconnect when audio resumes.
+        let audio_active = state.status.read().audio_active;
+        if last_audio_active && !audio_active {
+            info!("audio stream disconnected, restarting pipeline to prepare for reconnection");
+            last_audio_active = audio_active;
+            handle.restart().await;
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            return;
+        }
+        last_audio_active = audio_active;
     }
 }
 

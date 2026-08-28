@@ -282,8 +282,8 @@
     const host = location.host;
     const params = new URLSearchParams();
     if (cfg.overlay.font_size) params.set("size", cfg.overlay.font_size);
-    if (cfg.overlay.font_color) params.set("color", encodeURIComponent(cfg.overlay.font_color));
-    if (cfg.overlay.background_color) params.set("bg", encodeURIComponent(cfg.overlay.background_color));
+    if (cfg.overlay.font_color) params.set("color", cfg.overlay.font_color);
+    if (cfg.overlay.background_color) params.set("bg", cfg.overlay.background_color);
     if (cfg.overlay.bg_opacity !== undefined) params.set("bgOpacity", cfg.overlay.bg_opacity);
     if (cfg.overlay.position) params.set("position", cfg.overlay.position);
     if (cfg.overlay.animation) params.set("animation", cfg.overlay.animation);
