@@ -677,8 +677,16 @@ static struct obs_audio_data *filter_audio(void *data,
 	const struct audio_output_info *aoi =
 		audio_output_get_info(obs_get_audio());
 	const size_t channels = aoi ? get_audio_channels(aoi->speakers) : 0;
-	if (channels == 0 || channels > MAX_AV_PLANES)
+	if (channels == 0) {
+		/* OBS audio output not ready yet; skip this frame silently. */
 		return audio;
+	}
+	if (channels > MAX_AV_PLANES) {
+		blog(LOG_WARNING,
+		     "[SLT] unsupported channel count %zu (max %d)",
+		     channels, MAX_AV_PLANES);
+		return audio;
+	}
 
 	/* OBS audio filters receive planar float samples. */
 	const float *planes[MAX_AV_PLANES];
@@ -715,6 +723,9 @@ static struct obs_audio_data *filter_audio(void *data,
 			g_sender.in_rate = rate ? rate : 48000;
 			g_sender.resample_pos = 0;
 			g_sender.head = g_sender.tail = g_sender.used = 0;
+			blog(LOG_INFO,
+			     "[SLT] audio sample rate set to %u",
+			     g_sender.in_rate);
 		}
 		ring_push((const uint8_t *)mono, frames * sizeof(int16_t));
 		slt_mutex_unlock(&g_sender.mutex);
