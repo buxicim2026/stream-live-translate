@@ -11,12 +11,12 @@
   --text-dim: rgba(255, 255, 255, 0.6);
   --text-muted: rgba(255, 255, 255, 0.35);
   --accent: #7b93ff;
-  --accent-glow: rgba(123, 147, 255, 0.45);
+  --accent-glow: rgba(123, 147, 255, 0.65);
   --accent-2: #b79cff;
   --ok: #5eead4;
-  --ok-glow: rgba(94, 234, 212, 0.35);
+  --ok-glow: rgba(94, 234, 212, 0.55);
   --danger: #f87171;
-  --danger-glow: rgba(248, 113, 113, 0.35);
+  --danger-glow: rgba(248, 113, 113, 0.55);
   --warn: #fbbf24;
   --radius-lg: 28px;
   --radius-md: 18px;
@@ -109,10 +109,10 @@ a:hover { text-decoration: underline; }
 }
 .dot.ok { 
   background: var(--ok); 
-  box-shadow: 0 0 10px var(--ok-glow);
+  box-shadow: 0 0 14px var(--ok-glow), 0 0 4px var(--ok);
 }
-.dot.bad { background: var(--danger); }
-.dot.warn { background: var(--warn); }
+.dot.bad { background: var(--danger); box-shadow: 0 0 10px var(--danger-glow); }
+.dot.warn { background: var(--warn); box-shadow: 0 0 10px rgba(251, 191, 36, 0.5); }
 
 .run-state {
   padding: 3px 12px;
@@ -552,4 +552,23 @@ body.dock .history { max-height: 80px; }
   font-size: 12px;
   color: var(--text-dim);
   vertical-align: middle;
+}
+
+/* OBS size hint */
+.obs-size-hint {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* Footer */
+.footer {
+  text-align: center;
+  padding: 20px 0 28px;
+  font-size: 12px;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+  position: relative;
+  z-index: 1;
 }

@@ -64,13 +64,9 @@
     if (ov.font_size) root.setProperty("--caption-size", ov.font_size + "px");
     if (ov.font_color) root.setProperty("--caption-color", ov.font_color);
     const alpha = ov.bg_opacity !== undefined ? (ov.bg_opacity / 100) : 0.75;
-    if (ov.background_color && ov.background_color.trim()) {
-      const rgba = hexToRgba(ov.background_color, alpha);
-      if (rgba) root.setProperty("--caption-bg", rgba);
-      else root.setProperty("--caption-bg", `rgba(0,0,0,${alpha})`);
-    } else {
-      root.setProperty("--caption-bg", `rgba(0,0,0,${alpha})`);
-    }
+    const bgColor = ov.background_color && ov.background_color.trim() ? ov.background_color : "#000000";
+    const rgba = hexToRgba(bgColor, alpha);
+    root.setProperty("--caption-bg", rgba || `rgba(0,0,0,${alpha})`);
     if (ov.bg_width && ov.bg_width > 0) root.setProperty("--caption-width", ov.bg_width + "px");
     if (ov.bg_height && ov.bg_height > 0) root.setProperty("--caption-height", ov.bg_height + "px");
     if (ov.border_radius) root.setProperty("--caption-radius", ov.border_radius + "px");
@@ -100,8 +96,7 @@
     if (bg) {
       const alpha = bgOpacity ? (parseInt(bgOpacity, 10) / 100) : 0.75;
       const rgba = hexToRgba(bg, alpha);
-      if (rgba) root.setProperty("--caption-bg", rgba);
-      else root.setProperty("--caption-bg", bg);
+      root.setProperty("--caption-bg", rgba || `rgba(0,0,0,${alpha})`);
     } else if (bgOpacity) {
       root.setProperty("--caption-bg", `rgba(0,0,0,${parseInt(bgOpacity, 10) / 100})`);
     }
