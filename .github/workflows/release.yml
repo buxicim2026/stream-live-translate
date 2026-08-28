@@ -9,75 +9,49 @@ permissions:
   contents: write
 
 jobs:
-  create-release:
-    runs-on: ubuntu-latest
-    outputs:
-      release_id: ${{ steps.create_release.outputs.id }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Parse tag
-        id: tag
-        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref_name }}
-          release_name: v${{ steps.tag.outputs.version }}
-          draft: false
-          prerelease: false
-
   build-windows:
-    needs: create-release
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install Rust
         uses: dtolnay/rust-action@stable
         with:
           targets: x86_64-pc-windows-msvc
-      
+
       - name: Build
         run: cargo build --release --target x86_64-pc-windows-msvc
-      
+
       - name: Package
         shell: bash
         run: |
           mkdir -p artifacts
           cp target/x86_64-pc-windows-msvc/release/stream-live-translate.exe artifacts/
           cd artifacts
-          powershell -Command "Compress-Archive -Path 'stream-live-translate.exe' -DestinationPath 'stream-live-translate-windows-x86_64-v${{ github.ref_name }}.zip'"
-      
-      - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          powershell -Command "Compress-Archive -Path 'stream-live-translate.exe' -DestinationPath 'stream-live-translate-windows-x86_64.zip'"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: artifacts/stream-live-translate-windows-x86_64-v${{ github.ref_name }}.zip
-          asset_name: stream-live-translate-windows-x86_64-v${{ github.ref_name }}.zip
-          asset_content_type: application/zip
+          name: windows
+          path: artifacts/stream-live-translate-windows-x86_64.zip
 
   build-macos:
-    needs: create-release
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install Rust
         uses: dtolnay/rust-action@stable
         with:
           targets: x86_64-apple-darwin,aarch64-apple-darwin
-      
+
       - name: Build Intel
         run: cargo build --release --target x86_64-apple-darwin
-      
+
       - name: Build Apple Silicon
         run: cargo build --release --target aarch64-apple-darwin
-      
+
       - name: Package
         shell: bash
         run: |
@@ -85,49 +59,68 @@ jobs:
           cp target/x86_64-apple-darwin/release/stream-live-translate artifacts/stream-live-translate-x86_64
           cp target/aarch64-apple-darwin/release/stream-live-translate artifacts/stream-live-translate-aarch64
           cd artifacts
-          tar -czvf stream-live-translate-macos-v${{ github.ref_name }}.tar.gz *
-      
-      - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          tar -czvf stream-live-translate-macos.tar.gz *
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: artifacts/stream-live-translate-macos-v${{ github.ref_name }}.tar.gz
-          asset_name: stream-live-translate-macos-v${{ github.ref_name }}.tar.gz
-          asset_content_type: application/gzip
+          name: macos
+          path: artifacts/stream-live-translate-macos.tar.gz
 
   build-linux:
-    needs: create-release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install Rust
         uses: dtolnay/rust-action@stable
         with:
           targets: x86_64-unknown-linux-gnu
-      
-      - name: Build
+
+      - name: Install system deps
         run: |
           sudo apt-get update
           sudo apt-get install -y libasound2-dev pkg-config
-          cargo build --release --target x86_64-unknown-linux-gnu
-      
+
+      - name: Build
+        run: cargo build --release --target x86_64-unknown-linux-gnu
+
       - name: Package
         shell: bash
         run: |
           mkdir -p artifacts
           cp target/x86_64-unknown-linux-gnu/release/stream-live-translate artifacts/
           cd artifacts
-          tar -czvf stream-live-translate-linux-x86_64-v${{ github.ref_name }}.tar.gz *
-      
-      - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          tar -czvf stream-live-translate-linux-x86_64.tar.gz *
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: artifacts/stream-live-translate-linux-x86_64-v${{ github.ref_name }}.tar.gz
-          asset_name: stream-live-translate-linux-x86_64-v${{ github.ref_name }}.tar.gz
-          asset_content_type: application/gzip
+          name: linux
+          path: artifacts/stream-live-translate-linux-x86_64.tar.gz
+
+  release:
+    needs: [build-windows, build-macos, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts -type f
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/windows/*
+            artifacts/macos/*
+            artifacts/linux/*

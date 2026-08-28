@@ -91,6 +91,7 @@ pub mod qwen {
             let endpoint = cfg
                 .endpoint
                 .clone()
+                .filter(|s| !s.trim().is_empty())
                 .unwrap_or_else(|| DEFAULT_ENDPOINT.to_string());
             if cfg.api_key.is_empty() {
                 return Err(anyhow!("Qwen API key is empty; please fill it in the admin panel"));
