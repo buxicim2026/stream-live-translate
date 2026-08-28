@@ -151,6 +151,20 @@ async fn handle_conn(state: Arc<AppState>, mut stream: TcpStream) -> Result<()> 
     }
     info!(rate = in_rate, "OBS filter audio stream connected");
 
+    let result = pump_audio(&state, &mut stream, in_rate).await;
+    {
+        let mut s = state.status.write();
+        s.audio_active = false;
+    }
+    info!("OBS filter audio stream disconnected");
+    result
+}
+
+async fn pump_audio(
+    state: &Arc<AppState>,
+    stream: &mut TcpStream,
+    in_rate: u32,
+) -> Result<()> {
     let out_rate = {
         let r = state.config.read().audio.sample_rate;
         if r == 0 {
@@ -161,18 +175,19 @@ async fn handle_conn(state: Arc<AppState>, mut stream: TcpStream) -> Result<()> 
     };
     let frame_samples = (out_rate as usize * FRAME_SAMPLES_16K) / 16_000;
 
-    // --- PCM pump -----------------------------------------------------
     let mut read_buf = vec![0u8; 8 * 1024];
     let mut leftover_byte: Option<u8> = None;
     let mut sample_buf: Vec<i16> = Vec::with_capacity(frame_samples * 4);
 
     loop {
-        let n = stream.read(&mut read_buf).await.context("ingest read")?;
+        let n = stream
+            .read(&mut read_buf)
+            .await
+            .context("ingest read")?;
         if n == 0 {
-            break; // orderly close
+            break;
         }
 
-        // Decode s16le, keeping a single carry byte across reads.
         let mut bytes: &[u8] = &read_buf[..n];
         if let Some(prev) = leftover_byte.take() {
             sample_buf.push(i16::from_le_bytes([prev, bytes[0]]));
@@ -186,7 +201,6 @@ async fn handle_conn(state: Arc<AppState>, mut stream: TcpStream) -> Result<()> 
             leftover_byte = Some(*bytes.last().unwrap());
         }
 
-        // Resample once per read to the pipeline rate.
         let ready: Vec<i16> = if in_rate != out_rate {
             let out = crate::audio::resample_mono(&sample_buf, in_rate, out_rate);
             sample_buf.clear();
@@ -196,8 +210,6 @@ async fn handle_conn(state: Arc<AppState>, mut stream: TcpStream) -> Result<()> 
         };
 
         let mut frames = ready;
-        // Keep a tail smaller than one frame for the next read so frame
-        // boundaries stay stable.
         let tail = frames.len() % frame_samples;
         let tail_samples: Vec<i16> = if tail > 0 {
             frames.split_off(frames.len() - tail)
@@ -209,11 +221,5 @@ async fn handle_conn(state: Arc<AppState>, mut stream: TcpStream) -> Result<()> 
         }
         sample_buf.extend_from_slice(&tail_samples);
     }
-
-    {
-        let mut s = state.status.write();
-        s.audio_active = false;
-    }
-    info!("OBS filter audio stream disconnected");
     Ok(())
 }

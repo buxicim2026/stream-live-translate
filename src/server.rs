@@ -269,6 +269,9 @@ async fn post_config(
             .into_response();
     }
     *state.config.write() = cfg;
+    // Restart the pipeline so it picks up the new config immediately
+    // instead of waiting for the next watch() tick.
+    state.pipeline.restart().await;
     (
         StatusCode::OK,
         axum::Json(serde_json::json!({"ok": true})),

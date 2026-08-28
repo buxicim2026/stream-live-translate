@@ -119,7 +119,7 @@ async fn run(
                     s.llm_connected = false;
                 }
                 tokio::time::sleep(backoff).await;
-                backoff = (backoff * 2).min(Duration::from_secs(30));
+                backoff = (backoff * 2).min(Duration::from_secs(10));
                 continue;
             }
         }
@@ -129,6 +129,9 @@ async fn run(
 
 async fn watch(state: &Arc<AppState>, handle: &Arc<PipelineHandle>) {
     let mut last_provider = state.config.read().llm.provider.clone();
+    let mut last_api_key = state.config.read().llm.api_key.clone();
+    let mut last_model = state.config.read().llm.model.clone();
+    let mut last_endpoint = state.config.read().llm.endpoint.clone();
     let mut last_audio_mode = state.config.read().audio.mode.clone();
     let mut last_device = state.config.read().audio.device.clone();
     let mut ticker = tokio::time::interval(Duration::from_secs(2));
@@ -142,11 +145,17 @@ async fn watch(state: &Arc<AppState>, handle: &Arc<PipelineHandle>) {
         }
         let cur = state.config.read().clone();
         if cur.llm.provider != last_provider
+            || cur.llm.api_key != last_api_key
+            || cur.llm.model != last_model
+            || cur.llm.endpoint != last_endpoint
             || cur.audio.mode != last_audio_mode
             || cur.audio.device != last_device
         {
             info!("config changed, restarting pipeline");
             last_provider = cur.llm.provider.clone();
+            last_api_key = cur.llm.api_key.clone();
+            last_model = cur.llm.model.clone();
+            last_endpoint = cur.llm.endpoint.clone();
             last_audio_mode = cur.audio.mode.clone();
             last_device = cur.audio.device.clone();
             handle.restart().await;
@@ -184,7 +193,7 @@ async fn try_start(state: &Arc<AppState>, handle: &Arc<PipelineHandle>) -> Resul
             .map_err(|e| anyhow::anyhow!("audio start failed: {e}"))?;
         capturer_slot = Some(capturer);
     }
-    if !use_obs_filter {
+    {
         let mut s = state.status.write();
         s.audio_active = true;
         s.last_error = None;
@@ -201,7 +210,11 @@ async fn try_start(state: &Arc<AppState>, handle: &Arc<PipelineHandle>) -> Resul
         loop {
             let frame = match raw_rx.recv().await {
                 Some(f) => f,
-                None => return,
+                None => {
+                    info!("audio channel closed, marking audio inactive");
+                    vad_state.status.write().audio_active = false;
+                    return;
+                }
             };
             let spec_rate = vad_state
                 .config
