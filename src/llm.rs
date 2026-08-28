@@ -46,7 +46,7 @@ pub fn build(cfg: &LlmConfig) -> Result<Arc<dyn LlmProvider>> {
     match cfg.provider.as_str() {
         "qwen-realtime" => Ok(Arc::new(qwen::QwenRealtime::new(cfg.clone())?)),
         "openai-realtime" => Ok(Arc::new(openai::OpenAiRealtime::new(cfg.clone())?)),
-        "mock" => Ok(Arc::new(mock::MockProvider::new(cfg.clone())?)),
+        "mock" => Ok(Arc::new(mock::MockProvider::new(cfg.clone())?) as Arc<dyn LlmProvider>),
         other => Err(anyhow!("unknown LLM provider `{other}`")),
     }
 }
@@ -285,15 +285,15 @@ pub mod qwen {
     match ev {
         QwenEvent::ResponseTextText { text, .. } => {
             if !text.is_empty() {
-                let prev_len = LAST_TEXT_LEN.load(Ordering::Relaxed);
-                let text_bytes = text.as_bytes();
-                if text_bytes.len() > prev_len {
-                    let delta = &text[prev_len..];
+                let prev_chars = LAST_TEXT_LEN.load(Ordering::Relaxed);
+                let total_chars = text.chars().count();
+                if total_chars > prev_chars {
+                    let delta: String = text.chars().skip(prev_chars).collect();
                     if !delta.is_empty() {
-                        sink.push(SubtitleEvent::Partial(delta.to_string()));
+                        sink.push(SubtitleEvent::Partial(delta));
                     }
                 }
-                LAST_TEXT_LEN.store(text_bytes.len(), Ordering::Relaxed);
+                LAST_TEXT_LEN.store(total_chars, Ordering::Relaxed);
             }
         }
         QwenEvent::ResponseTextDone { text } => {
