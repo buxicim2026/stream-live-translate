@@ -29,12 +29,11 @@ body.position-middle { align-items: center; }
 
 .caption {
   display: inline-block;
-  max-width: min(92%, 1400px);
-  padding: 14px 28px;
+  padding: 8px 20px;
   border-radius: var(--caption-radius, 14px);
   background: var(--caption-bg, rgba(0,0,0,0.75));
   text-align: center;
-  line-height: 1.25;
+  line-height: 1.3;
   letter-spacing: 0.01em;
   white-space: nowrap;
   word-break: normal;
@@ -47,9 +46,9 @@ body.position-middle { align-items: center; }
     0 0 2px rgba(0, 0, 0, 0.8);
   transition: opacity 200ms ease, transform 200ms ease;
   position: relative;
-  min-height: 1.4em;
-  width: var(--caption-width, auto);
-  height: var(--caption-height, auto);
+  min-height: auto;
+  width: auto;
+  max-width: none;
 }
 
 .caption.empty {

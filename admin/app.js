@@ -300,6 +300,7 @@
     if (!box || !input || !currentConfig) return;
     input.value = buildOverlayUrl(currentConfig);
     box.hidden = false;
+    box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
   async function loadConfig() {

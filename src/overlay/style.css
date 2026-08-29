@@ -29,7 +29,6 @@ body.position-middle { align-items: center; }
 
 .caption {
   display: inline-block;
-  max-width: min(92%, 1400px);
   padding: 8px 20px;
   border-radius: var(--caption-radius, 14px);
   background: var(--caption-bg, rgba(0,0,0,0.75));
@@ -48,8 +47,8 @@ body.position-middle { align-items: center; }
   transition: opacity 200ms ease, transform 200ms ease;
   position: relative;
   min-height: auto;
-  width: var(--caption-width, auto);
-  height: var(--caption-height, auto);
+  width: auto;
+  max-width: none;
 }
 
 .caption.empty {
