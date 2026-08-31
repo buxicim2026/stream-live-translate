@@ -44,6 +44,10 @@ font_size = 48
 font_color = "#FFFFFF"
 background_color = "#000000"
 background_opacity = 0.55
+bg_opacity = 75              # 背景不透明度 0-100（0=全透明，100=全黑）
+bg_width = 0                 # 背景宽度 px，0 = 自动贴合文字
+bg_height = 0                # 背景高度 px，0 = 自动（刚好一行）
+border_radius = 8            # 背景圆角 px
 position = "bottom"          # bottom | top | middle
 layout = "single"            # single | double
 animation = "typewriter"     # typewriter | fade | slide

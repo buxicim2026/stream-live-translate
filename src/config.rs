@@ -57,6 +57,14 @@ fn default_static_dir() -> PathBuf {
     PathBuf::from("dist")
 }
 
+fn default_bg_opacity() -> u32 {
+    75
+}
+
+fn default_border_radius() -> u32 {
+    8
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioConfig {
     /// `"system"` (loopback), `"device"` (input mic / specific output) or
@@ -121,17 +129,18 @@ pub struct OverlayConfig {
     pub font_color: String,
     pub background_color: String,
     pub background_opacity: f32,
-    /// Background width in pixels. 0 = auto (fit content).
+    /// Background width in pixels. 0 = auto (fit content, one line).
     #[serde(default)]
     pub bg_width: u32,
-    /// Background height in pixels. 0 = auto (fit content).
+    /// Background height in pixels. 0 = auto (exactly one line tall).
     #[serde(default)]
     pub bg_height: u32,
     /// Background border radius in pixels.
-    #[serde(default)]
+    #[serde(default = "default_border_radius")]
     pub border_radius: u32,
-    /// Background opacity 0-100.
-    #[serde(default)]
+    /// Background opacity 0-100 (0 = fully transparent, 100 = opaque).
+    /// Older config files predate this key, hence the explicit default.
+    #[serde(default = "default_bg_opacity")]
     pub bg_opacity: u32,
     /// `bottom` / `top` / `middle`
     pub position: String,

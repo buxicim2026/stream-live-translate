@@ -1,7 +1,14 @@
 /* Browser Source overlay for live subtitles.
    Width/height of the OBS browser source should be set to the intended
    on-screen region. The stage is anchored to the bottom (or top/middle)
-   via the body class. */
+   via the body class.
+
+   背景规则（v0.0.20）：
+   * 字幕恒为「一行」，永不换行 —— 背景高度默认刚好包住这一行。
+   * 背景颜色 + 透明度由 JS 合成 rgba() 写入 --caption-bg（admin 面板
+     「背景设置 → 背景 / 背景透明度」）。
+   * 宽 / 高 / 圆角由 --caption-width / --caption-height / --caption-radius
+     控制，0 或 auto = 自动贴合内容。 */
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { width: 100%; height: 100%; background: transparent; }
@@ -29,50 +36,57 @@ body.position-middle { align-items: center; }
 }
 
 .caption {
-  display: inline-block;
-  max-width: min(92%, 1400px);
-  padding: 14px 28px;
-  border-radius: 14px;
-  background: rgba(0, 0, 0, 0.55);
+  /* inline-flex + align-items:center 让「固定高度」时文字垂直居中；
+     未指定高度时高度 = 一行 line-height + padding，即「一行高」。 */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  max-width: min(96%, 1600px);
+  padding: 10px 24px;
+  border-radius: var(--caption-radius, 14px);
+  background: var(--caption-bg, rgba(0, 0, 0, 0.75));
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   text-align: center;
   line-height: 1.25;
   letter-spacing: 0.01em;
-  white-space: pre-wrap;
-  word-break: break-word;
   font-weight: 600;
-  font-size: 48px;
+  font-size: var(--caption-size, 48px);
   text-shadow:
     0 2px 6px rgba(0, 0, 0, 0.6),
     0 0 2px rgba(0, 0, 0, 0.8);
   transition: opacity 200ms ease, transform 200ms ease;
   position: relative;
-  min-height: 1.4em;
+  overflow: hidden;
+  /* 0 = 自动（贴合一行文字）；admin 面板里填了具体数值则由 JS 覆盖。 */
+  width: var(--caption-width, auto);
+  height: var(--caption-height, auto);
 }
 
 .caption.empty {
   opacity: 0;
 }
 
+/* Hard single line: never wrap, shrink with an ellipsis instead.
+   min-width:0 lets the flex item shrink so text-overflow can kick in. */
+.caption-line {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 body.layout-double .caption { font-size: 40px; }
-body.layout-double .caption .caption-line + .caption-line { display: block; margin-top: 6px; }
 
 body.animation-fade    .caption { transition: opacity 240ms ease; }
 body.animation-slide   .caption { transition: transform 240ms ease, opacity 240ms ease; }
-body.animation-typewriter .caption-line { border-right: 0.04em solid transparent; }
 
-/* Hard two-line cap: JS trims from the head so the newest words win;
-   this clamp is a safety net in case the measurement misses. */
-.caption-line {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-/* Typewriter cursor */
+/* Typewriter cursor — sits on the SAME line as the text (flex item). */
 .caption-cursor {
+  flex: 0 0 auto;
   display: inline-block;
   width: 0.55ch;
   background: currentColor;
@@ -90,7 +104,6 @@ body.animation-slide .caption-cursor { display: none; }
 body.animation-slide .caption { transform: translateY(8px); }
 body.animation-slide .caption.show { transform: translateY(0); }
 
-/* Color helpers overridden by JS. */
+/* Color / size helpers overridden by JS. */
 .caption { color: var(--caption-color, #FFFFFF); }
-.caption { background: var(--caption-bg, rgba(0,0,0,0.55)); }
 .caption { font-size: var(--caption-size, 48px); }

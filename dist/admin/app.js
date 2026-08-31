@@ -197,6 +197,50 @@
       `${location.protocol}//${location.host}/admin?obsDock=1`;
 
     updateProviderUI();
+    applyPreviewStyles();
+  }
+
+  function hexToRgba(hex, alpha) {
+    if (!hex || hex[0] !== "#") return null;
+    let h = hex.slice(1);
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    if (h.length !== 6 || /[^0-9a-fA-F]/.test(h)) return null;
+    return `rgba(${parseInt(h.slice(0, 2), 16)},${parseInt(h.slice(2, 4), 16)},` +
+           `${parseInt(h.slice(4, 6), 16)},${alpha})`;
+  }
+
+  // 预览区按 1920px 画布的 0.45 倍等比缩放，观感与 OBS 里一致。
+  const PREVIEW_SCALE = 0.45;
+
+  /// 把「字幕样式 / 背景设置」实时套用到预览字幕上，改完立即看到效果。
+  function applyPreviewStyles() {
+    const el = $("preview-caption");
+    const stage = $("preview-stage");
+    if (!el || !stage) return;
+
+    const num = (id, dflt) => {
+      const n = parseInt($(id).value, 10);
+      return isFinite(n) ? n : dflt;
+    };
+    const size = Math.max(8, num("ov-size", 48));
+    const w = Math.max(0, num("ov-bg-width", 0));
+    const h = Math.max(0, num("ov-bg-height", 0));
+    const radius = Math.max(0, num("ov-border-radius", 8));
+    const opacity = Math.min(100, Math.max(0, num("ov-bg-opacity", 75)));
+    const k = PREVIEW_SCALE;
+
+    el.style.fontSize = Math.round(size * k) + "px";
+    el.style.lineHeight = "1.25";
+    el.style.padding = `${Math.round(10 * k)}px ${Math.round(24 * k)}px`;
+    el.style.color = $("ov-color").value;
+    el.style.background =
+      hexToRgba($("ov-bg").value, opacity / 100) || `rgba(0,0,0,${opacity / 100})`;
+    // 0 = 自动：宽度贴合文字，高度刚好一行。
+    el.style.width = w > 0 ? Math.round(w * k) + "px" : "auto";
+    el.style.height = h > 0 ? Math.round(h * k) + "px" : "auto";
+    el.style.borderRadius = Math.round(radius * k) + "px";
+
+    stage.className = "preview-stage position-" + ($("ov-position").value || "bottom");
   }
 
   // Update UI based on selected provider type
@@ -431,6 +475,12 @@
   $("provider-type").addEventListener("change", updateProviderUI);
   $("ov-bg-opacity").addEventListener("input", (e) => {
     $("ov-opacity-display").textContent = e.target.value + "%";
+  });
+  // 背景设置改动即时反映到预览（保存后同样作用于 OBS 浏览器源）。
+  ["ov-size", "ov-bg-width", "ov-bg-height", "ov-border-radius",
+   "ov-bg-opacity", "ov-color", "ov-bg", "ov-position"].forEach((id) => {
+    const el = $(id);
+    if (el) el.addEventListener("input", applyPreviewStyles);
   });
   $("save-btn").addEventListener("click", async () => {
     const patch = collectPatch();

@@ -368,11 +368,21 @@ a:hover { text-decoration: underline; }
   text-align: center;
   max-width: 95%;
   font-size: 26px;
-  line-height: 1.2;
+  line-height: 1.25;
+  border: 1px solid rgba(255,255,255,0.08);
+  /* 与 overlay 保持一致：一行高 + 固定宽高时文字居中 */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+#preview-line {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  border: 1px solid rgba(255,255,255,0.08);
 }
 .preview-caption.empty { opacity: 0; }
 
