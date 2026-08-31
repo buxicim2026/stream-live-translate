@@ -54,6 +54,12 @@ struct Cli {
 
 pub struct AppState {
     pub config: Arc<RwLock<Config>>,
+    /// Notifies connected overlays that the overlay style config changed so
+    /// they can restyle themselves live — the user no longer has to copy a
+    /// fresh browser-source URL after tweaking the background settings.
+    /// The payload is empty on purpose: receivers re-read `state.config`,
+    /// which guarantees they always get the newest value.
+    pub config_tx: tokio::sync::broadcast::Sender<()>,
     pub subtitle: Arc<subtitle::SubtitleHub>,
     pub pipeline: Arc<pipeline::PipelineHandle>,
     pub status: Arc<RwLock<AppStatus>>,
@@ -156,8 +162,11 @@ async fn main() -> Result<()> {
     let pipeline = Arc::new(pipeline::PipelineHandle::new());
     let status = Arc::new(RwLock::new(AppStatus::default()));
 
+    let (config_tx, _config_rx) = tokio::sync::broadcast::channel::<()>(16);
+
     let state = Arc::new(AppState {
         config: Arc::new(RwLock::new(cfg.clone())),
+        config_tx,
         subtitle: subtitle.clone(),
         pipeline: pipeline.clone(),
         status: status.clone(),

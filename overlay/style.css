@@ -51,6 +51,9 @@ body.position-middle { align-items: center; }
   text-align: center;
   line-height: 1.25;
   letter-spacing: 0.01em;
+  /* 长句时给出稳定的两行行距，避免换行瞬间背景抖动 */
+  word-break: break-word;
+  overflow-wrap: break-word;
   font-weight: 600;
   font-size: var(--caption-size, 48px);
   text-shadow:
@@ -68,15 +71,18 @@ body.position-middle { align-items: center; }
   opacity: 0;
 }
 
-/* Hard single line: never wrap, shrink with an ellipsis instead.
-   min-width:0 lets the flex item shrink so text-overflow can kick in. */
+/* 默认一行；文字放不下时折到第二行，超过上限才用省略号截断。
+   -webkit-line-clamp 的数值由 JS 按 admin 的「最大行数」直接写在元素上
+   （var() 在 -webkit-line-clamp 里兼容性不稳，故不用 CSS 变量）。
+   短句时 shrink-to-fit 让背景刚好包住文字，长句时才撑到两行。 */
 .caption-line {
-  display: block;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
   min-width: 0;
   max-width: 100%;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 body.layout-double .caption { font-size: 40px; }

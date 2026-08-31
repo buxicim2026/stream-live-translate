@@ -187,6 +187,8 @@
     $("ov-bg-width").value = cfg.overlay.bg_width || 0;
     $("ov-bg-height").value = cfg.overlay.bg_height || 0;
     $("ov-border-radius").value = cfg.overlay.border_radius || 8;
+    const maxLinesEl = $("ov-max-lines");
+    if (maxLinesEl) maxLinesEl.value = cfg.overlay.max_lines || 2;
     $("ov-bg-opacity").value = cfg.overlay.bg_opacity !== undefined ? cfg.overlay.bg_opacity : 75;
     $("ov-opacity-display").textContent = (cfg.overlay.bg_opacity !== undefined ? cfg.overlay.bg_opacity : 75) + "%";
     $("ov-color").value = cfg.overlay.font_color || "#ffffff";
@@ -218,8 +220,11 @@
     const stage = $("preview-stage");
     if (!el || !stage) return;
 
+    // 元素缺失时（例如浏览器缓存了旧版 index.html）退回默认值，
+    // 避免整个面板因为多了一个新字段而白屏。
     const num = (id, dflt) => {
-      const n = parseInt($(id).value, 10);
+      const el = $(id);
+      const n = el ? parseInt(el.value, 10) : NaN;
       return isFinite(n) ? n : dflt;
     };
     const size = Math.max(8, num("ov-size", 48));
@@ -239,6 +244,15 @@
     el.style.width = w > 0 ? Math.round(w * k) + "px" : "auto";
     el.style.height = h > 0 ? Math.round(h * k) + "px" : "auto";
     el.style.borderRadius = Math.round(radius * k) + "px";
+
+    // 与 overlay 一致：行数上限直接写在元素上（CSS 变量在
+    // -webkit-line-clamp 里兼容性不可靠）。
+    const lineEl = $("preview-line");
+    if (lineEl) {
+      const lines = Math.min(3, Math.max(1, num("ov-max-lines", 2)));
+      lineEl.style.setProperty("-webkit-line-clamp", String(lines));
+      lineEl.style.setProperty("line-clamp", String(lines));
+    }
 
     stage.className = "preview-stage position-" + ($("ov-position").value || "bottom");
   }
@@ -309,6 +323,7 @@
       },
       overlay: {
         font_size: parseInt($("ov-size").value, 10) || 48,
+        max_lines: Math.min(3, Math.max(1, parseInt(($("ov-max-lines") || {}).value, 10) || 2)),
         bg_width: Math.max(0, parseInt($("ov-bg-width").value, 10) || 0),
         bg_height: Math.max(0, parseInt($("ov-bg-height").value, 10) || 0),
         border_radius: Math.max(0, parseInt($("ov-border-radius").value, 10) || 8),
@@ -321,28 +336,19 @@
     };
   }
 
-  function buildOverlayUrl(cfg) {
+  // 样式不再写进 URL hash：样式由 overlay 从 /api/config 拉取，并在保存时
+  // 通过 WebSocket 实时推送。旧 URL 里残留的 hash 参数会被服务端配置覆盖，
+  // 所以已经填好的 OBS 浏览器源不必重新复制。
+  function buildOverlayUrl() {
     const proto = location.protocol === "https:" ? "https:" : "http:";
-    const host = location.host;
-    const params = new URLSearchParams();
-    if (cfg.overlay.font_size) params.set("size", cfg.overlay.font_size);
-    if (cfg.overlay.font_color) params.set("color", cfg.overlay.font_color);
-    if (cfg.overlay.background_color) params.set("bg", cfg.overlay.background_color);
-    if (cfg.overlay.bg_opacity !== undefined) params.set("bgOpacity", cfg.overlay.bg_opacity);
-    if (cfg.overlay.position) params.set("position", cfg.overlay.position);
-    if (cfg.overlay.animation) params.set("animation", cfg.overlay.animation);
-    if (cfg.overlay.bg_width) params.set("bgWidth", cfg.overlay.bg_width);
-    if (cfg.overlay.bg_height) params.set("bgHeight", cfg.overlay.bg_height);
-    if (cfg.overlay.border_radius) params.set("radius", cfg.overlay.border_radius);
-    const hash = params.toString();
-    return `${proto}//${host}/overlay${hash ? '#' + hash : ''}`;
+    return `${proto}//${location.host}/overlay`;
   }
 
   function showOverlayUrl() {
     const box = $("overlay-url-box");
     const input = $("overlay-url");
     if (!box || !input || !currentConfig) return;
-    input.value = buildOverlayUrl(currentConfig);
+    input.value = buildOverlayUrl();
     box.hidden = false;
     box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
@@ -478,7 +484,7 @@
   });
   // 背景设置改动即时反映到预览（保存后同样作用于 OBS 浏览器源）。
   ["ov-size", "ov-bg-width", "ov-bg-height", "ov-border-radius",
-   "ov-bg-opacity", "ov-color", "ov-bg", "ov-position"].forEach((id) => {
+   "ov-bg-opacity", "ov-color", "ov-bg", "ov-position", "ov-max-lines"].forEach((id) => {
     const el = $(id);
     if (el) el.addEventListener("input", applyPreviewStyles);
   });

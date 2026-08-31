@@ -46,8 +46,9 @@ background_color = "#000000"
 background_opacity = 0.55
 bg_opacity = 75              # 背景不透明度 0-100（0=全透明，100=全黑）
 bg_width = 0                 # 背景宽度 px，0 = 自动贴合文字
-bg_height = 0                # 背景高度 px，0 = 自动（刚好一行）
+bg_height = 0                # 背景高度 px，0 = 自动（按行数自适应）
 border_radius = 8            # 背景圆角 px
+max_lines = 2                # 字幕最大行数：一行放不下时折到下一行，超过才省略；1 = 严格单行
 position = "bottom"          # bottom | top | middle
 layout = "single"            # single | double
 animation = "typewriter"     # typewriter | fade | slide

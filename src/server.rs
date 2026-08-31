@@ -269,6 +269,11 @@ async fn post_config(
             .into_response();
     }
     *state.config.write() = cfg;
+    // Tell every connected overlay to re-apply the (now updated) style.
+    // Without this the OBS browser source keeps the style it fetched at
+    // startup, so the user would have to copy a new URL after every save.
+    // An empty payload is intentional: receivers re-read state.config.
+    let _ = state.config_tx.send(());
     // Restart the pipeline so it picks up the new config immediately
     // instead of waiting for the next watch() tick.
     state.pipeline.restart().await;
@@ -401,8 +406,28 @@ struct WsQuery {
     since: Option<String>,
 }
 
+/// Push the current overlay style to one client as `{"type":"config",...}`.
+/// Returns false when the socket died and the caller should stop the loop.
+async fn send_config(socket: &mut WebSocket, state: &Arc<AppState>) -> bool {
+    let ov = state.config.read().overlay.clone();
+    let payload = serde_json::json!({
+        "type": "config",
+        "overlay": ov,
+    });
+    socket
+        .send(Message::Text(payload.to_string().into()))
+        .await
+        .is_ok()
+}
+
 async fn ws_loop(mut socket: WebSocket, state: Arc<AppState>) {
     let mut rx = state.subtitle.subscribe();
+    let mut cfg_rx = state.config_tx.subscribe();
+    // Style first: a freshly opened browser source (or one that just
+    // reconnected) must render correctly even if nothing changes later.
+    if !send_config(&mut socket, &state).await {
+        return;
+    }
     // Send the current state immediately.
     if let Some(cur) = state.subtitle.current() {
         let payload = serde_json::json!({
@@ -435,6 +460,17 @@ async fn ws_loop(mut socket: WebSocket, state: Arc<AppState>) {
                     .await
                     .is_err()
                 {
+                    return;
+                }
+            }
+            // Overlay style saved from the admin panel: restyle live.
+            cfg = cfg_rx.recv() => {
+                // Err means the sender is gone (shutting down); bail out
+                // instead of spinning on a permanently-ready branch.
+                if cfg.is_err() {
+                    return;
+                }
+                if !send_config(&mut socket, &state).await {
                     return;
                 }
             }

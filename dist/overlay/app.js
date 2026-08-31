@@ -82,6 +82,7 @@
     width: 0,
     height: 0,
     radius: 8,
+    maxLines: 2,
   };
 
   function renderStyle() {
@@ -100,6 +101,13 @@
     root.setProperty("--caption-height", Number(style.height) > 0 ? Number(style.height) + "px" : "auto");
     const r = Number(style.radius);
     root.setProperty("--caption-radius", (isFinite(r) && r >= 0 ? r : 8) + "px");
+
+    // 行数上限直接写到元素上：var() 在 -webkit-line-clamp 里兼容性不可靠。
+    let lines = Math.round(Number(style.maxLines));
+    if (!isFinite(lines) || lines < 1) lines = 2;
+    if (lines > 3) lines = 3;
+    lineEl.style.setProperty("-webkit-line-clamp", String(lines));
+    lineEl.style.setProperty("line-clamp", String(lines));
   }
 
   function setBodyVariant(prefix, value) {
@@ -125,6 +133,7 @@
     if (ov.bg_width !== undefined) style.width = Number(ov.bg_width) || 0;
     if (ov.bg_height !== undefined) style.height = Number(ov.bg_height) || 0;
     if (ov.border_radius !== undefined) style.radius = Number(ov.border_radius) || 0;
+    if (ov.max_lines !== undefined) style.maxLines = Number(ov.max_lines) || 2;
     renderStyle();
     setBodyVariant("position", ov.position);
     setBodyVariant("animation", ov.animation);
@@ -147,6 +156,7 @@
     if (get("bgWidth") !== null) style.width = Number(get("bgWidth")) || 0;
     if (get("bgHeight") !== null) style.height = Number(get("bgHeight")) || 0;
     if (get("radius") !== null) style.radius = Number(get("radius")) || 0;
+    if (get("maxLines") !== null) style.maxLines = Number(get("maxLines")) || 2;
     renderStyle();
 
     setBodyVariant("position", get("position"));
@@ -156,7 +166,8 @@
 
   // ---- rendering ---------------------------------------------------------
 
-  /// 折叠换行与多余空白，保证字幕永远只占一行。
+  /// 折叠模型可能吐出的换行与多余空白。是否折行由 CSS 依据宽度决定，
+  /// 所以这里只需保证没有「硬换行」把背景撑成三行。
   function toSingleLine(text) {
     return String(text == null ? "" : text)
       .replace(/[\r\n]+/g, " ")
@@ -168,7 +179,9 @@
     if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
     const line = toSingleLine(text);
     currentText = line;
-    lineEl.textContent = line.length > 200 ? line.slice(0, 200) + "…" : line;
+    // 只做病态输入兜底；真正的「超出多少字」由 CSS line-clamp 处理，
+    // 这样才能在正确的位置显示省略号（JS 截断会提前把句子砍短）。
+    lineEl.textContent = line.length > 400 ? line.slice(0, 400) + "…" : line;
     captionEl.classList.remove("empty");
     captionEl.classList.add("show");
   }
@@ -219,14 +232,31 @@
 
   // ---- transport ---------------------------------------------------------
 
+  /// admin 保存配置后由服务端 /api/config 广播推来，overlay 立即重刷样式。
+  async function loadConfig() {
+    try {
+      const r = await fetch("/api/config", { cache: "no-store" });
+      const cfg = await r.json();
+      if (cfg.overlay) applyOverlayConfig(cfg.overlay);
+    } catch (e) {
+      console.warn("overlay: failed to load config from API, using defaults", e);
+    }
+  }
+
   function connectWS() {
     const wsScheme = location.protocol === "https:" ? "wss" : "ws";
     ws = new WebSocket(`${wsScheme}://${location.host}/ws/subtitles`);
-    ws.addEventListener("open", () => { console.log("overlay ws connected"); });
+    ws.addEventListener("open", () => {
+      console.log("overlay ws connected");
+      // 兜底：即使服务端是旧版（不会主动推 config），重连后也能拿到最新样式。
+      loadConfig();
+    });
     ws.addEventListener("message", (ev) => {
       let payload;
       try { payload = JSON.parse(ev.data); } catch { return; }
-      if (payload.type === "current" && payload.line) {
+      if (payload.type === "config") {
+        if (payload.overlay) applyOverlayConfig(payload.overlay);
+      } else if (payload.type === "current" && payload.line) {
         const cleaned = cleanText(payload.line.text || "");
         if (cleaned && !isDuplicate(cleaned)) {
           show(cleaned);
@@ -246,14 +276,11 @@
   }
 
   async function init() {
-    try {
-      const r = await fetch("/api/config");
-      const cfg = await r.json();
-      if (cfg.overlay) applyOverlayConfig(cfg.overlay);
-    } catch (e) {
-      console.warn("overlay: failed to load config from API, using defaults", e);
-    }
+    // 顺序很关键：先 hash（旧版留下的 URL 参数）再 /api/config，
+    // 让服务端配置成为唯一权威来源 —— 这样 admin 改动即时生效，
+    // 用户不必重新复制 OBS 浏览器源 URL。
     parseHash();
+    await loadConfig();
     connectWS();
   }
 

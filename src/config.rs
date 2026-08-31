@@ -65,6 +65,10 @@ fn default_border_radius() -> u32 {
     8
 }
 
+fn default_max_lines() -> u32 {
+    2
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioConfig {
     /// `"system"` (loopback), `"device"` (input mic / specific output) or
@@ -142,6 +146,11 @@ pub struct OverlayConfig {
     /// Older config files predate this key, hence the explicit default.
     #[serde(default = "default_bg_opacity")]
     pub bg_opacity: u32,
+    /// Max caption lines. Text that overflows wraps onto the next line up
+    /// to this count, then gets clamped with an ellipsis. 1 = strict single
+    /// line, 2 = the default (wrap to a second line when needed).
+    #[serde(default = "default_max_lines")]
+    pub max_lines: u32,
     /// `bottom` / `top` / `middle`
     pub position: String,
     /// `single` / `double`
@@ -201,6 +210,7 @@ impl Default for Config {
                 bg_height: 0,
                 border_radius: 8,
                 bg_opacity: 75,
+                max_lines: 2,
                 position: "bottom".into(),
                 layout: "single".into(),
                 animation: "typewriter".into(),

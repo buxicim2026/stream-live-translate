@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <title>Stream Live Translate · 控制台</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <link rel="stylesheet" href="/admin-assets/style.css?v=0.0.21" />
+  <link rel="stylesheet" href="/admin-assets/style.css?v=0.0.22" />
 </head>
 <body>
   <header class="topbar">
@@ -113,9 +113,13 @@
 
     <section class="card">
       <h2>4. 字幕样式</h2>
-      <p class="hint">这些值会写入浏览器源的 URL hash 覆盖默认值。字幕强制显示为一行。</p>
+      <p class="hint">保存后 OBS 字幕<b>立即生效</b>，无需重新复制下方 URL。</p>
       <label>字体大小 (px)
         <input id="ov-size" type="number" value="48" />
+      </label>
+      <label>最大行数
+        <input id="ov-max-lines" type="number" value="2" min="1" max="3" />
+        <span class="field-note">一行放不下时折到下一行，超出上限才省略。填 1 = 严格单行。</span>
       </label>
       <label>背景尺寸（px）
           <div class="size-row">
@@ -190,7 +194,7 @@
     </section>
   </main>
 
-  <script src="/admin-assets/app.js?v=0.0.21"></script>
+  <script src="/admin-assets/app.js?v=0.0.22"></script>
   <div id="toast" class="toast" hidden></div>
   <footer class="footer">本插件由不息传播制作</footer>
 </body>
