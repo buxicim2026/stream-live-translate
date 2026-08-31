@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <title>Stream Live Translate · 控制台</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <link rel="stylesheet" href="/admin-assets/style.css?v=0.0.22" />
+  <link rel="stylesheet" href="/admin-assets/style.css?v=0.0.23" />
 </head>
 <body>
   <header class="topbar">
@@ -118,8 +118,8 @@
         <input id="ov-size" type="number" value="48" />
       </label>
       <label>最大行数
-        <input id="ov-max-lines" type="number" value="2" min="1" max="3" />
-        <span class="field-note">一行放不下时折到下一行，超出上限才省略。填 1 = 严格单行。</span>
+        <input id="ov-max-lines" type="number" value="2" min="1" max="4" />
+        <span class="field-note">行数按需增长：短句一行，放不下自动折到 2/3/4 行，超出上限才省略。填 1 = 严格单行。</span>
       </label>
       <label>背景尺寸（px）
           <div class="size-row">
@@ -194,7 +194,7 @@
     </section>
   </main>
 
-  <script src="/admin-assets/app.js?v=0.0.22"></script>
+  <script src="/admin-assets/app.js?v=0.0.23"></script>
   <div id="toast" class="toast" hidden></div>
   <footer class="footer">本插件由不息传播制作</footer>
 </body>

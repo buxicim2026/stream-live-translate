@@ -147,8 +147,8 @@ pub struct OverlayConfig {
     #[serde(default = "default_bg_opacity")]
     pub bg_opacity: u32,
     /// Max caption lines. Text that overflows wraps onto the next line up
-    /// to this count, then gets clamped with an ellipsis. 1 = strict single
-    /// line, 2 = the default (wrap to a second line when needed).
+    /// to this count (max 4), then gets clamped with an ellipsis. 1 = strict
+    /// single line, 2 = the default (grow only when the text needs it).
     #[serde(default = "default_max_lines")]
     pub max_lines: u32,
     /// `bottom` / `top` / `middle`

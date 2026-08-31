@@ -103,9 +103,10 @@
     root.setProperty("--caption-radius", (isFinite(r) && r >= 0 ? r : 8) + "px");
 
     // 行数上限直接写到元素上：var() 在 -webkit-line-clamp 里兼容性不可靠。
+    // 允许到 4 行：两行仍放不下时继续扩展，避免省略号吞掉内容。
     let lines = Math.round(Number(style.maxLines));
     if (!isFinite(lines) || lines < 1) lines = 2;
-    if (lines > 3) lines = 3;
+    if (lines > 4) lines = 4;
     lineEl.style.setProperty("-webkit-line-clamp", String(lines));
     lineEl.style.setProperty("line-clamp", String(lines));
   }

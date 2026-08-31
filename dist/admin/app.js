@@ -249,7 +249,7 @@
     // -webkit-line-clamp 里兼容性不可靠）。
     const lineEl = $("preview-line");
     if (lineEl) {
-      const lines = Math.min(3, Math.max(1, num("ov-max-lines", 2)));
+      const lines = Math.min(4, Math.max(1, num("ov-max-lines", 2)));
       lineEl.style.setProperty("-webkit-line-clamp", String(lines));
       lineEl.style.setProperty("line-clamp", String(lines));
     }
@@ -323,7 +323,7 @@
       },
       overlay: {
         font_size: parseInt($("ov-size").value, 10) || 48,
-        max_lines: Math.min(3, Math.max(1, parseInt(($("ov-max-lines") || {}).value, 10) || 2)),
+        max_lines: Math.min(4, Math.max(1, parseInt(($("ov-max-lines") || {}).value, 10) || 2)),
         bg_width: Math.max(0, parseInt($("ov-bg-width").value, 10) || 0),
         bg_height: Math.max(0, parseInt($("ov-bg-height").value, 10) || 0),
         border_radius: Math.max(0, parseInt($("ov-border-radius").value, 10) || 8),

@@ -2,11 +2,18 @@
   --bg-start: #0a0c18;
   --bg-mid: #0f1123;
   --bg-end: #060810;
-  --glass-bg: rgba(15, 18, 40, 0.65);
-  --glass-bg-light: rgba(20, 24, 50, 0.75);
-  --glass-border: rgba(255, 255, 255, 0.08);
-  --glass-border-bright: rgba(255, 255, 255, 0.15);
-  --glass-shine: rgba(255, 255, 255, 0.04);
+  /* 液态玻璃：玻璃本体近乎透明，效果来自背后高饱和极光色团被
+     backdrop-filter 折射，加上"左上亮、右下暗"的高光描边。 */
+  --glass-bg: linear-gradient(150deg,
+      rgba(255, 255, 255, 0.15) 0%,
+      rgba(255, 255, 255, 0.05) 42%,
+      rgba(255, 255, 255, 0.10) 100%);
+  /* 压在极光之上的暗色薄纱：保留色彩与通透感，同时保证白字可读 */
+  --glass-tint: rgba(10, 12, 28, 0.42);
+  --glass-bg-light: rgba(255, 255, 255, 0.10);
+  --glass-border: rgba(255, 255, 255, 0.16);
+  --glass-border-bright: rgba(255, 255, 255, 0.34);
+  --glass-shine: rgba(255, 255, 255, 0.22);
   --text: #ffffff;
   --text-dim: rgba(255, 255, 255, 0.6);
   --text-muted: rgba(255, 255, 255, 0.35);
@@ -36,26 +43,49 @@ body {
   position: relative;
 }
 
-/* Animated mesh background */
+/* 极光色团 —— 液态玻璃的"被折射物"。玻璃本身是透明的，几乎所有
+   观感都来自这些高饱和、缓慢游动的色团。此前 alpha 只有 0.04~0.08，
+   模糊后等于一片纯色，玻璃自然看不出来；这里提高到 0.3~0.5 并加大。 */
 body::before {
   content: '';
   position: fixed;
-  top: -50%;
-  left: -50%;
-  width: 200%;
-  height: 200%;
+  inset: -25%;
   background:
-    radial-gradient(ellipse at 20% 20%, rgba(108, 140, 255, 0.08) 0%, transparent 50%),
-    radial-gradient(ellipse at 80% 80%, rgba(167, 139, 250, 0.06) 0%, transparent 50%),
-    radial-gradient(ellipse at 50% 50%, rgba(108, 140, 255, 0.04) 0%, transparent 60%);
-  animation: meshMove 20s ease-in-out infinite;
+    radial-gradient(36% 40% at 14% 20%, rgba(96, 132, 255, 0.50) 0%, transparent 64%),
+    radial-gradient(32% 38% at 86% 16%, rgba(176, 130, 255, 0.46) 0%, transparent 64%),
+    radial-gradient(40% 44% at 78% 82%, rgba(56, 214, 208, 0.34) 0%, transparent 62%),
+    radial-gradient(34% 40% at 18% 86%, rgba(255, 132, 186, 0.32) 0%, transparent 64%),
+    radial-gradient(52% 52% at 50% 50%, rgba(70, 96, 220, 0.28) 0%, transparent 70%);
+  animation: auroraDrift 28s ease-in-out infinite;
   pointer-events: none;
   z-index: 0;
+  will-change: transform;
 }
-@keyframes meshMove {
-  0%, 100% { transform: translate(0, 0) rotate(0deg); }
-  33% { transform: translate(2%, 1%) rotate(1deg); }
-  66% { transform: translate(-1%, 2%) rotate(-1deg); }
+@keyframes auroraDrift {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1) rotate(0deg); }
+  25%      { transform: translate3d(2.5%, -2%, 0) scale(1.08) rotate(1.5deg); }
+  50%      { transform: translate3d(-2%, 2.5%, 0) scale(1.04) rotate(-1deg); }
+  75%      { transform: translate3d(1.5%, 2%, 0) scale(1.10) rotate(-1.5deg); }
+}
+
+/* 第二层：反向漂移，制造视差与"流动"感 */
+body::after {
+  content: '';
+  position: fixed;
+  inset: -25%;
+  background:
+    radial-gradient(28% 32% at 30% 70%, rgba(255, 190, 120, 0.26) 0%, transparent 62%),
+    radial-gradient(26% 30% at 70% 30%, rgba(120, 220, 255, 0.28) 0%, transparent 62%),
+    radial-gradient(42% 46% at 50% 50%, rgba(140, 110, 255, 0.20) 0%, transparent 68%);
+  animation: auroraDrift2 36s ease-in-out infinite;
+  pointer-events: none;
+  z-index: 0;
+  will-change: transform;
+}
+@keyframes auroraDrift2 {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1.05) rotate(0deg); }
+  33%      { transform: translate3d(-3%, -2%, 0) scale(1) rotate(-2deg); }
+  66%      { transform: translate3d(2.5%, 1.5%, 0) scale(1.12) rotate(1.5deg); }
 }
 
 a { color: var(--accent); text-decoration: none; }
@@ -66,14 +96,17 @@ a:hover { text-decoration: underline; }
   align-items: center;
   justify-content: space-between;
   padding: 14px 24px;
-  background: rgba(20, 24, 48, 0.85);
+  background-color: rgba(14, 17, 38, 0.55);
+  background-image: linear-gradient(180deg, rgba(255,255,255,0.09) 0%, rgba(255,255,255,0.03) 100%);
   border-bottom: 1px solid var(--glass-border);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(26px) saturate(180%);
+  -webkit-backdrop-filter: blur(26px) saturate(180%);
   position: sticky;
   top: 0;
   z-index: 100;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  box-shadow:
+    0 6px 28px rgba(0, 0, 0, 0.40),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.12);
 }
 
 .brand { 
@@ -148,20 +181,28 @@ a:hover { text-decoration: underline; }
 }
 
 .card {
-  background: var(--glass-bg);
+  /* 白色高光渐变叠在暗色薄纱之上：既透出极光的颜色，又保证白字可读 */
+  background-color: var(--glass-tint);
+  background-image: var(--glass-bg);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   padding: 20px 22px;
-  transition: border-color 0.3s, box-shadow 0.3s, transform 0.2s;
+  transition: border-color 0.3s, box-shadow 0.3s, transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
   position: relative;
   overflow: hidden;
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  /* 加大模糊与饱和度，让背后的极光色团被"折射"出来 */
+  backdrop-filter: blur(30px) saturate(185%) brightness(1.06);
+  -webkit-backdrop-filter: blur(30px) saturate(185%) brightness(1.06);
   box-shadow:
-    0 8px 40px rgba(0, 0, 0, 0.4),
-    0 0 0 1px rgba(255, 255, 255, 0.03) inset,
-    inset 0 1px 0 var(--glass-shine);
+    0 18px 50px rgba(0, 0, 0, 0.45),
+    0 2px 8px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.26),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.07),
+    inset 1px 0 0 rgba(255, 255, 255, 0.06),
+    inset -1px 0 0 rgba(255, 255, 255, 0.04);
 }
+/* 兜底：不支持 mask 时只画顶部高光线。若直接铺渐变矩形，
+   一旦 mask 失效会把整张卡片盖成灰白、文字完全看不清。 */
 .card::before {
   content: '';
   position: absolute;
@@ -169,27 +210,66 @@ a:hover { text-decoration: underline; }
   left: 0;
   right: 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.38), transparent);
   pointer-events: none;
 }
+/* 液态玻璃的标志：左上亮、右下暗的渐变描边（高光边缘）。
+   用 mask 抠出 1px 环，避免伪元素盖住内容。 */
+@supports (mask-composite: exclude) or (-webkit-mask-composite: xor) {
+  .card::before {
+    top: auto;
+    left: auto;
+    right: auto;
+    height: auto;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(140deg,
+        rgba(255, 255, 255, 0.65) 0%,
+        rgba(255, 255, 255, 0.12) 28%,
+        rgba(255, 255, 255, 0.04) 55%,
+        rgba(255, 255, 255, 0.30) 100%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+  }
+}
+/* 掠过玻璃表面的高光，缓慢扫动，强化"液态"感 */
 .card::after {
   content: '';
   position: absolute;
-  top: 0;
-  left: -50%;
-  width: 200%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.02), transparent);
+  top: -60%;
+  left: -60%;
+  width: 55%;
+  height: 220%;
+  background: linear-gradient(90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.03) 40%,
+      rgba(255, 255, 255, 0.15) 50%,
+      rgba(255, 255, 255, 0.03) 60%,
+      transparent 100%);
   pointer-events: none;
-  transform: skewX(-15deg);
+  animation: glassSheen 9s ease-in-out infinite;
+  will-change: transform, opacity;
 }
+@keyframes glassSheen {
+  0%       { transform: rotate(18deg) translateX(0);    opacity: 0; }
+  10%      { opacity: 0.9; }
+  60%      { transform: rotate(18deg) translateX(330%); opacity: 0.9; }
+  75%,100% { transform: rotate(18deg) translateX(330%); opacity: 0; }
+}
+/* 错开各卡片的高光时机，避免整屏同步闪动显得机械 */
+.card:nth-child(2n)::after { animation-delay: -3.1s; }
+.card:nth-child(3n)::after { animation-delay: -5.7s; }
 .card:hover {
   border-color: var(--glass-border-bright);
   box-shadow:
-    0 16px 56px rgba(0, 0, 0, 0.5),
-    0 0 0 1px rgba(123, 147, 255, 0.12),
-    inset 0 1px 0 var(--glass-shine);
-  transform: translateY(-2px);
+    0 26px 70px rgba(0, 0, 0, 0.55),
+    0 0 32px rgba(123, 147, 255, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.34),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.09);
+  transform: translateY(-3px);
 }
 .card.wide { grid-column: 1 / -1; }
 
@@ -453,14 +533,28 @@ button.ghost:hover {
   z-index: 200;
   opacity: 0;
   transition: opacity 0.2s, transform 0.2s;
-  background: rgba(25, 27, 45, 0.97);
+  background-color: rgba(16, 18, 40, 0.68);
+  background-image: linear-gradient(150deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.05) 100%);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
   color: var(--text);
-  border: 1px solid rgba(255,255,255,0.12);
+  border: 1px solid rgba(255,255,255,0.22);
+  box-shadow:
+    0 18px 50px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.26);
   max-width: 85vw;
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-.toast.ok { background: rgba(20, 50, 30, 0.97); border-color: var(--ok); color: #b8f5c8; }
-.toast.error { background: rgba(50, 20, 20, 0.97); border-color: var(--danger); color: #ffc8c8; }
+.toast.ok {
+  background-color: rgba(18, 46, 30, 0.68);
+  border-color: var(--ok);
+  color: #b8f5c8;
+}
+.toast.error {
+  background-color: rgba(48, 20, 20, 0.68);
+  border-color: var(--danger);
+  color: #ffc8c8;
+}
 
 .history {
   font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", monospace;
@@ -491,7 +585,8 @@ body.dock .topbar { padding: 8px 12px; }
 body.dock .grid { padding: 10px; gap: 10px; grid-template-columns: 1fr; }
 body.dock .card { padding: 12px 14px; }
 body.dock .card.wide { grid-column: auto; }
-body.dock .preview { height: 110px; }
+/* 4 行字幕在 dock 窄栏里需要更多高度，否则预览会被裁掉 */
+body.dock .preview { height: 140px; }
 body.dock .preview-caption { font-size: 14px; }
 body.dock .history { max-height: 80px; }
 
@@ -590,8 +685,26 @@ body.dock .history { max-height: 80px; }
   text-align: center;
   padding: 20px 0 28px;
   font-size: 12px;
-  color: var(--text-muted);
+  /* 背景极光变亮后，页脚没有玻璃层遮挡，需提高字色并加暗投影保证可读 */
+  color: rgba(255, 255, 255, 0.62);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
   letter-spacing: 0.05em;
   position: relative;
   z-index: 1;
+}
+
+/* 无障碍 / 性能开关：极光游动会带动所有卡片的 backdrop-filter 逐帧重算，
+   在 OBS 内置浏览器里长时间开着可能占用 GPU。系统开启"减弱动态效果"
+   时停掉动画，玻璃质感（模糊、高光描边）保留。 */
+@media (prefers-reduced-motion: reduce) {
+  body::before,
+  body::after,
+  .card::after {
+    animation: none;
+  }
+  .card,
+  .topbar,
+  button {
+    transition: none;
+  }
 }
