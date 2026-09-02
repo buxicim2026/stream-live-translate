@@ -204,6 +204,15 @@ static slt_sock_t slt_connect(uint16_t port)
 	if (s == SLT_INVALID_SOCK)
 		return SLT_INVALID_SOCK;
 
+#ifndef _WIN32
+#ifdef SO_NOSIGPIPE
+	/* macOS / BSD sockets have no MSG_NOSIGNAL; instead disable SIGPIPE
+	 * per-socket so a broken connection can't kill the plugin process. */
+	int nosig = 1;
+	setsockopt(s, SOL_SOCKET, SO_NOSIGPIPE, &nosig, sizeof(nosig));
+#endif
+#endif
+
 	struct sockaddr_in addr;
 	memset(&addr, 0, sizeof(addr));
 	addr.sin_family = AF_INET;
@@ -243,7 +252,14 @@ static bool slt_send_all(slt_sock_t s, const uint8_t *buf, size_t len)
 #ifdef _WIN32
 		int n = send(s, (const char *)buf + off, (int)(len - off), 0);
 #else
+		/* MSG_NOSIGNAL is a Linux/glibc extension and is undefined on
+		 * macOS / BSD; there we rely on SO_NOSIGPIPE (set in
+		 * slt_connect) to avoid SIGPIPE. */
+#ifdef MSG_NOSIGNAL
 		ssize_t n = send(s, buf + off, len - off, MSG_NOSIGNAL);
+#else
+		ssize_t n = send(s, buf + off, len - off, 0);
+#endif
 #endif
 		if (n <= 0)
 			return false;

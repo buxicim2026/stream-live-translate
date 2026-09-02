@@ -208,8 +208,11 @@
   // 继续把新增内容逐单位打出来；整句（mock / final / 重连快照）一次到达时
   // 则自动从当前显示处往下打，观感接近实时。
 
-  const TYPE_WORD_MS = 75;  // 拉丁语：一个词间隔（ms）
-  const TYPE_CHAR_MS = 45;  // CJK：一个字间隔（ms）
+  const TYPE_WORD_MS = 55;  // 拉丁语：一个词间隔（ms）
+  const TYPE_CHAR_MS = 32;  // CJK：一个字间隔（ms）
+  // 实时流领先打字游标超过这么多「单位」时，直接整段追上显示，
+  // 防止模型一次性吐出大段 partial 时字幕越来越落后于说话进度。
+  const TYPE_CATCHUP_UNITS = 8;
   let typeTimer = null;
   let typeMode = "word";
   let typeTarget = "";      // 期望显示的整段
@@ -252,7 +255,12 @@
   function typeTick() {
     typeTimer = null;
     if (typePos >= typeTarget.length) return; // 打完了
-    typePos = nextUnitEnd(typeTarget, typePos);
+    // 落后太多（实时流一次推来一大段）→ 直接追上，保证低延迟。
+    if (typeTarget.length - typePos > TYPE_CATCHUP_UNITS) {
+      typePos = typeTarget.length;
+    } else {
+      typePos = nextUnitEnd(typeTarget, typePos);
+    }
     textEl.textContent = typeTarget.slice(0, typePos);
     if (typePos < typeTarget.length) {
       typeTimer = setTimeout(typeTick, typeMode === "word" ? TYPE_WORD_MS : TYPE_CHAR_MS);
