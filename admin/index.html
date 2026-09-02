@@ -34,7 +34,8 @@
       <label><span data-i18n="llm.provider">API 服务</span>
         <select id="provider-type">
           <option value="qwen" data-i18n="llm.provider.qwen">通义 Qwen API（推荐）</option>
-          <option value="online" data-i18n="llm.provider.online">其它在线 API（GPT / Gemini / 火山引擎 / 讯飞等）</option>
+          <option value="glm" data-i18n="llm.provider.glm">智谱 GLM-Realtime</option>
+          <option value="online" data-i18n="llm.provider.online">OpenAI / 其它在线 API</option>
           <option value="local" data-i18n="llm.provider.local">本机部署 API（Ollama / LocalAI 等）</option>
           <option value="mock" data-i18n="llm.provider.mock">模拟模式（不消耗额度）</option>
         </select>
@@ -71,6 +72,15 @@
       <label class="row">
         <input id="translate_chinese" type="checkbox" />
         <span data-i18n="llm.translate_zh">对中文也调用翻译（默认否，节省 token）</span>
+      </label>
+      <label class="row" id="transcribe_row">
+        <input id="transcribe" type="checkbox" />
+        <span data-i18n="llm.transcribe">实时字幕模式：只显示“说话人的语音转写”，忽略模型自己的回复（GLM / OpenAI 语音对话模型用）</span>
+      </label>
+      <label id="transcription_model_row" class="row" style="display:none">
+        <span data-i18n="llm.transcribe.model">转写子模型</span>
+        <input id="transcription_model" type="text" placeholder="gpt-4o-mini-transcribe" />
+        <span class="hint" data-i18n="llm.transcribe.model.hint">留空自动（OpenAI 默认 gpt-4o-mini-transcribe；GLM 通常不用填）</span>
       </label>
       <label class="row">
         <input id="low_latency" type="checkbox" />

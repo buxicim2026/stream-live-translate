@@ -54,6 +54,15 @@ pub struct LlmConfig {
     /// 字幕按段持续推进，延迟可压到 ~1–2 秒（代价：长句被切成短段）。
     #[serde(default)]
     pub segment_ms: u64,
+    /// 实时字幕模式（OpenAI / GLM 等 OpenAI 兼容 realtime 通道使用）：
+    /// 开启后会话里启用 input_audio_transcription（用户语音转写），并且
+    /// 只把「说话人的转写」当字幕显示，忽略模型自己的回复文本。
+    #[serde(default)]
+    pub transcribe: bool,
+    /// 实时字幕模式下的转写子模型名。留空 = 自动：
+    /// OpenAI 官方端点默认 gpt-4o-mini-transcribe；其它厂商按会话主模型尝试。
+    #[serde(default)]
+    pub transcription_model: String,
 }
 
 fn default_ingest_port() -> u16 {
@@ -185,6 +194,8 @@ impl Default for Config {
                 translate_chinese: false,
                 system_prompt: None,
                 segment_ms: 0,
+                transcribe: false,
+                transcription_model: String::new(),
             },
             audio: AudioConfig {
                 mode: "system".into(),

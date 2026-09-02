@@ -41,7 +41,7 @@
       "llm.hint": "填入你自己的大模型 API Key。所有内容只在本地保存。",
       "llm.provider": "API 服务",
       "llm.provider.qwen": "通义 Qwen API（推荐）",
-      "llm.provider.online": "其它在线 API（GPT / Gemini / 火山引擎 / 讯飞等）",
+      "llm.provider.online": "OpenAI / 其它在线 API",
       "llm.provider.local": "本机部署 API（Ollama / LocalAI 等）",
       "llm.provider.mock": "模拟模式（不消耗额度）",
       "llm.model": "Model（模型名称）",
@@ -50,6 +50,10 @@
       "llm.baseurl.ph": "留空使用内置默认地址",
       "llm.target": "翻译目标语言",
       "llm.translate_zh": "对中文也调用翻译（默认否，节省 token）",
+      "llm.provider.glm": "智谱 GLM-Realtime",
+      "llm.transcribe": "实时字幕模式：只显示“说话人的语音转写”，忽略模型自己的回复（GLM / OpenAI 语音对话模型用）",
+      "llm.transcribe.model": "转写子模型",
+      "llm.transcribe.model.hint": "留空自动（OpenAI 默认 gpt-4o-mini-transcribe；GLM 通常不用填）",
       "llm.lowlat": "低延迟模式：不等一句话说完，字幕边说边出",
       "llm.lowlat.ms": "分段时长",
       "llm.lowlat.hint": "开启后每段约 1–1.5 秒即出，适合实时同传；延迟低但长句会被切短。中文直播只要中文字幕时，建议把模型换成 qwen3-asr-flash-realtime（ASR）效果最佳。",
@@ -157,7 +161,7 @@
       "llm.hint": "Enter your own model API key. Everything is stored locally only.",
       "llm.provider": "API Provider",
       "llm.provider.qwen": "Qwen API (recommended)",
-      "llm.provider.online": "Other online API (GPT / Gemini / Volcengine / iFlytek …)",
+      "llm.provider.online": "OpenAI / other online APIs",
       "llm.provider.local": "Self-hosted API (Ollama / LocalAI …)",
       "llm.provider.mock": "Mock mode (no quota used)",
       "llm.model": "Model",
@@ -166,6 +170,10 @@
       "llm.baseurl.ph": "Leave empty for the built-in default",
       "llm.target": "Target language",
       "llm.translate_zh": "Also translate Chinese input (off by default, saves tokens)",
+      "llm.provider.glm": "Zhipu GLM-Realtime",
+      "llm.transcribe": "Caption mode: show only the speaker's speech transcription, ignore the model's own replies (for GLM / OpenAI voice models)",
+      "llm.transcribe.model": "Transcription model",
+      "llm.transcribe.model.hint": "Leave empty for auto (OpenAI defaults to gpt-4o-mini-transcribe; GLM usually needs none)",
       "llm.lowlat": "Low-latency mode: show subtitles while speaking, no need to wait for a full sentence",
       "llm.lowlat.ms": "Segment length",
       "llm.lowlat.hint": "When on, a subtitle segment appears every ~1–1.5s — great for live interpretation; latency is low but long sentences get split. For Chinese livestreams that only need Chinese captions, switch the model to qwen3-asr-flash-realtime (ASR) for best results.",
@@ -386,6 +394,7 @@
   // Provider type to internal provider name mapping
   const PROVIDER_TYPE_MAP = {
     "qwen": "qwen-realtime",
+    "glm": "openai-realtime",
     "online": "openai-realtime",
     "local": "openai-realtime",
     "mock": "mock"
@@ -407,13 +416,25 @@
         endpointDefault: "",
         className: "qwen-hint"
       },
-      "online": {
-        boxHtml: `<strong>🌐 其它在线 API</strong><br />支持 OpenAI 兼容接口的在线服务，包括 GPT、Gemini、火山引擎、讯飞等。`,
-        modelPlaceholder: "gpt-4o-realtime",
+      "glm": {
+        boxHtml: `<strong>💡 智谱 GLM-Realtime</strong><br />OpenAI 兼容实时协议，端点默认 <code>wss://open.bigmodel.cn/api/paas/v4/realtime</code>。做直播字幕请在下方勾选「实时字幕模式」：会话会开启说话人语音转写，字幕只显示说话内容，忽略模型自己的回复。`,
+        modelPlaceholder: "glm-realtime",
         modelSuggestions: [
-          { value: "gpt-4o-realtime", label: "OpenAI GPT-4o Realtime" },
-          { value: "gpt-4o-mini-realtime", label: "OpenAI GPT-4o-mini Realtime" },
-          { value: "gemini-2.0-flash-exp", label: "Google Gemini 2.0 Flash" }
+          { value: "glm-realtime", label: "GLM-Realtime（默认）" },
+          { value: "glm-realtime-flash", label: "GLM-Realtime-Flash（9B，更便宜）" },
+          { value: "glm-realtime-air", label: "GLM-Realtime-Air（32B）" }
+        ],
+        endpointPlaceholder: "wss://open.bigmodel.cn/api/paas/v4/realtime",
+        endpointDefault: "wss://open.bigmodel.cn/api/paas/v4/realtime",
+        className: "online-hint"
+      },
+      "online": {
+        boxHtml: `<strong>🌐 OpenAI / 其它在线 API</strong><br />支持 OpenAI 兼容 Realtime 接口的在线服务。做直播字幕同样请勾选下方「实时字幕模式」。`,
+        modelPlaceholder: "gpt-realtime",
+        modelSuggestions: [
+          { value: "gpt-realtime", label: "OpenAI GPT-Realtime（语音对语音）" },
+          { value: "gpt-4o-realtime-preview", label: "OpenAI GPT-4o Realtime（预览）" },
+          { value: "gpt-4o-mini-realtime-preview", label: "OpenAI GPT-4o-mini Realtime（预览）" }
         ],
         endpointPlaceholder: "例如：wss://api.openai.com/v1/realtime",
         endpointDefault: "wss://api.openai.com/v1/realtime",
@@ -454,13 +475,25 @@
         endpointDefault: "",
         className: "qwen-hint"
       },
-      "online": {
-        boxHtml: `<strong>🌐 Other Online APIs</strong><br />Any OpenAI-compatible online service, including GPT, Gemini, Volcengine and iFlytek.`,
-        modelPlaceholder: "gpt-4o-realtime",
+      "glm": {
+        boxHtml: `<strong>💡 Zhipu GLM-Realtime</strong><br />OpenAI-compatible realtime over <code>wss://open.bigmodel.cn/api/paas/v4/realtime</code>. For live captions tick “Caption mode” below — the session enables speaker transcription and subtitles show only what the person says, ignoring the model's replies.`,
+        modelPlaceholder: "glm-realtime",
         modelSuggestions: [
-          { value: "gpt-4o-realtime", label: "OpenAI GPT-4o Realtime" },
-          { value: "gpt-4o-mini-realtime", label: "OpenAI GPT-4o-mini Realtime" },
-          { value: "gemini-2.0-flash-exp", label: "Google Gemini 2.0 Flash" }
+          { value: "glm-realtime", label: "GLM-Realtime (default)" },
+          { value: "glm-realtime-flash", label: "GLM-Realtime-Flash (9B, cheaper)" },
+          { value: "glm-realtime-air", label: "GLM-Realtime-Air (32B)" }
+        ],
+        endpointPlaceholder: "wss://open.bigmodel.cn/api/paas/v4/realtime",
+        endpointDefault: "wss://open.bigmodel.cn/api/paas/v4/realtime",
+        className: "online-hint"
+      },
+      "online": {
+        boxHtml: `<strong>🌐 OpenAI / Other online APIs</strong><br />Any OpenAI-compatible Realtime endpoint. For live captions also tick “Caption mode” below.`,
+        modelPlaceholder: "gpt-realtime",
+        modelSuggestions: [
+          { value: "gpt-realtime", label: "OpenAI GPT-Realtime (speech-to-speech)" },
+          { value: "gpt-4o-realtime-preview", label: "OpenAI GPT-4o Realtime (preview)" },
+          { value: "gpt-4o-mini-realtime-preview", label: "OpenAI GPT-4o-mini Realtime (preview)" }
         ],
         endpointPlaceholder: "e.g. wss://api.openai.com/v1/realtime",
         endpointDefault: "wss://api.openai.com/v1/realtime",
@@ -519,6 +552,12 @@
     syncLowLatencyRows(on);
   }
 
+  /// 实时字幕模式：勾选 → 显示「转写子模型」输入。
+  function syncTranscribeRows(on) {
+    const row = $("transcription_model_row");
+    if (row) row.style.display = on ? "" : "none";
+  }
+
   function fillForm(cfg) {
     // Determine provider type from internal provider name
     let providerType = "online";
@@ -526,7 +565,9 @@
     else if (cfg.llm.provider === "mock") providerType = "mock";
     else if (cfg.llm.provider === "openai-realtime") {
       const ep = cfg.llm.endpoint || "";
-      if (ep.includes("localhost") || ep.includes("127.0.0.1")) {
+      if (ep.includes("bigmodel.cn")) {
+        providerType = "glm";
+      } else if (ep.includes("localhost") || ep.includes("127.0.0.1")) {
         providerType = "local";
       } else {
         providerType = "online";
@@ -539,6 +580,10 @@
     $("endpoint").value = cfg.llm.endpoint || "";
     $("target_lang").value = cfg.llm.target_lang || "zh";
     $("translate_chinese").checked = cfg.llm.translate_chinese;
+    const trEl = $("transcribe");
+    if (trEl) trEl.checked = !!cfg.llm.transcribe;
+    const tmi = $("transcription_model");
+    if (tmi) tmi.value = cfg.llm.transcription_model || "";
     syncLowLatency(cfg.llm.segment_ms || 0);
 
     // Defensive: if the config's mode isn't among the options
@@ -764,6 +809,12 @@
     if (providerType !== "mock" && !endpointInput.value) {
       endpointInput.value = hintData.endpointDefault;
     }
+
+    // 实时字幕模式只对 OpenAI 兼容通道（GLM / OpenAI / 其它在线 / 本地）有意义。
+    const openaiLike = providerType === "glm" || providerType === "online" || providerType === "local";
+    const trRow = $("transcribe_row");
+    if (trRow) trRow.style.display = openaiLike ? "" : "none";
+    syncTranscribeRows($("transcribe") ? $("transcribe").checked : false);
   }
 
   function collectPatch() {
@@ -782,6 +833,9 @@
         segment_ms: ($("low_latency") && $("low_latency").checked)
           ? (Number($("segment_ms").value) || 1200)
           : 0,
+        // 实时字幕模式（GLM / OpenAI 等 OpenAI 兼容通道）：只显示说话人语音转写。
+        transcribe: !!($("transcribe") && $("transcribe").checked),
+        transcription_model: (($("transcription_model") || {}).value || "").trim(),
       },
       audio: {
         mode: $("audio-mode").value,
@@ -964,6 +1018,8 @@
   $("provider-type").addEventListener("change", updateProviderUI);
   const lowLatCb = $("low_latency");
   if (lowLatCb) lowLatCb.addEventListener("change", () => syncLowLatencyRows(lowLatCb.checked));
+  const trCb = $("transcribe");
+  if (trCb) trCb.addEventListener("change", () => syncTranscribeRows(trCb.checked));
   $("ov-bg-opacity").addEventListener("input", (e) => {
     $("ov-opacity-display").textContent = e.target.value + "%";
   });

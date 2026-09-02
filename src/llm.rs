@@ -562,6 +562,22 @@ pub mod openai {
             if let Some(prompt) = self.cfg.system_prompt.as_deref().filter(|p| !p.trim().is_empty()) {
                 session_cfg["instructions"] = serde_json::Value::String(prompt.to_string());
             }
+            // 实时字幕模式：开启「用户语音转写」通道（OpenAI / GLM 等 OpenAI
+            // 兼容 realtime）。OpenAI 官方端点默认用 gpt-4o-mini-transcribe；
+            // 其它厂商（如 GLM）没有明确子模型名时先用会话主模型名试探。
+            let transcribe_mode = self.cfg.transcribe;
+            if transcribe_mode {
+                let default_tm = if self.endpoint.to_lowercase().contains("api.openai.com") {
+                    "gpt-4o-mini-transcribe".to_string()
+                } else {
+                    self.cfg.model.clone()
+                };
+                let tm = {
+                    let m = self.cfg.transcription_model.trim().to_string();
+                    if m.is_empty() { default_tm } else { m }
+                };
+                session_cfg["input_audio_transcription"] = serde_json::json!({ "model": tm });
+            }
             write_half.send(Message::Text(
                 serde_json::json!({ "type": "session.update", "session": session_cfg })
                     .to_string()
@@ -587,12 +603,13 @@ pub mod openai {
                                             sink.push(SubtitleEvent::Final(d.to_string()));
                                         }
                                     }
-                                    "response.text.delta" => {
+                                    // 字幕模式：忽略模型自己的回复文本，只显示说话人转写。
+                                    "response.text.delta" if !transcribe_mode => {
                                         if let Some(d) = v.get("delta").and_then(|s| s.as_str()) {
                                             sink.push(SubtitleEvent::Partial(d.to_string()));
                                         }
                                     }
-                                    "response.text.done" => {
+                                    "response.text.done" if !transcribe_mode => {
                                         if let Some(d) = v.get("text").and_then(|s| s.as_str()) {
                                             sink.push(SubtitleEvent::Final(d.to_string()));
                                         }
