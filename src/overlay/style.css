@@ -71,32 +71,17 @@ body.position-middle { align-items: center; }
   opacity: 0;
 }
 
-/* 视口：高度贴合内容，但最多 --caption-max-height（= 最大行数 × 行高，
-   由 JS 计算）。短句时背景仍贴合文字，长句才撑到上限。
-   超出上限的部分不再用省略号吞掉，而是由 JS 按段依次显示出来。 */
+/* 字幕文字直接写在这里。JS 每次只放入「当前这一句」（已按最大行数切好），
+   超出部分换到下一句，所以这里不做任何裁剪 —— 不需要 max-height 或
+   overflow:hidden，也没有 transform 位移（那是被否掉的滚动方案）。 */
 .caption-line {
   display: block;
   min-width: 0;
   max-width: 100%;
-  max-height: var(--caption-max-height, none);
-  overflow: hidden;
 }
 
-/* 承载文字的内层。transform 不影响布局，所以外层视口高度保持稳定，
-   换段时背景高度不会跳动。
-   刻意不设 transition：分段是「整段替换」而不是滚动，加了过渡就又会
-   变成用户不想要的来回滚动效果。 */
-.caption-inner {
-  display: block;
-  width: 100%;
-}
-
-/* 最大行数 = 1：严格单行，不折行；超出用省略号（无分段）。 */
+/* 最大行数 = 1：严格单行，不折行，超出用省略号。 */
 .caption-line.single-line {
-  max-height: none;
-}
-.caption-line.single-line .caption-inner {
-  transform: none !important;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

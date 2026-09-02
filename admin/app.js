@@ -85,7 +85,7 @@
       "style.hint": "保存后 OBS 字幕<b>立即生效</b>，无需重新复制下方 URL。",
       "style.size": "字体大小 (px)",
       "style.maxlines": "最大行数",
-      "style.maxlines.note": "行数按需增长：短句一行，放不下自动折到 2/3/4 行。<b>超出上限不再省略，改为自动分段依次显示</b>（英文新闻、访谈等长句场景）。填 1 = 严格单行 + 省略号。",
+      "style.maxlines.note": "行数按需增长：短句一行，放不下自动折到 2/3/4 行。<b>超出上限的部分直接换到下一句字幕显示</b>（英文新闻、访谈等长句场景），全程无滚动效果。填 1 = 严格单行 + 省略号。",
       "style.bgsize": "背景尺寸（px）",
       "style.width": "宽度",
       "style.height": "高度",
@@ -198,7 +198,7 @@
       "style.hint": "Saved changes apply to the OBS overlay <b>immediately</b> — no need to re-copy the URL below.",
       "style.size": "Font size (px)",
       "style.maxlines": "Max lines",
-      "style.maxlines.note": "Grows as needed: one line for short text, wrapping to 2/3/4 lines when it doesn’t fit. <b>Text past the limit is not truncated — it is shown in successive segments</b> (long-form news, interviews). Set 1 for a strict single line with an ellipsis.",
+      "style.maxlines.note": "Grows as needed: one line for short text, wrapping to 2/3/4 lines when it doesn’t fit. <b>Text past the limit rolls over into the next subtitle</b> (long-form news, interviews) — no scrolling effect. Set 1 for a strict single line with an ellipsis.",
       "style.bgsize": "Background size (px)",
       "style.width": "Width",
       "style.height": "Height",
@@ -628,121 +628,80 @@
     el.style.height = h > 0 ? Math.round(h * k) + "px" : "auto";
     el.style.borderRadius = Math.round(radius * k) + "px";
 
-    // 与 overlay 一致：视口高度 = 最大行数 × 行高，超出部分分段显示。
+    // 与 overlay 一致：超出最大行数就换到下一句显示，不做滚动/位移。
     // 这里不再用 -webkit-line-clamp —— 否则预览显示省略号，而 OBS 里在
-    // 分段播放，两边观感对不上。
+    // 换句，两边观感对不上。
     const lineEl = $("preview-line");
     if (lineEl) {
       const lines = Math.min(4, Math.max(1, num("ov-max-lines", 2)));
       lineEl.style.removeProperty("-webkit-line-clamp");
       lineEl.style.removeProperty("line-clamp");
       lineEl.classList.toggle("single-line", lines <= 1);
-      const lh = parseFloat(getComputedStyle(el).lineHeight) || Math.round(size * k) * 1.25;
-      lineEl.style.setProperty("--preview-max-height", (lines * lh).toFixed(2) + "px");
-      ensurePreviewInner();
-      previewPager.restart();
+      previewLines = lines;
+      renderPreview();
     }
 
     stage.className = "preview-stage position-" + ($("ov-position").value || "bottom");
   }
 
-  /// 与 overlay 同样的结构：外层 #preview-line 当视口裁切，
-  /// 文字放进内层 .preview-inner，靠 transform 位移分段显示。
-  /// 动态创建，避免依赖 index.html 改版。
-  function ensurePreviewInner() {
+  // 预览区用与 overlay 完全相同的换句逻辑：文字实时渲染，超出最大行数
+  // 就从溢出处另起一句，不做滚动/位移。
+  let previewLines = 2;      // 当前预览的最大行数
+  let previewPageStart = 0;  // 当前这句在预览文本中的起始下标
+  let previewText = "";      // 预览的完整文本
+
+  function previewMeasure(s) {
     const lineEl = $("preview-line");
-    if (!lineEl) return null;
-    let inner = lineEl.querySelector(".preview-inner");
-    if (!inner) {
-      inner = document.createElement("span");
-      inner.className = "preview-inner";
-      while (lineEl.firstChild) inner.appendChild(lineEl.firstChild);
-      lineEl.appendChild(inner);
-    }
-    return inner;
+    if (!lineEl) return 0;
+    lineEl.textContent = s;
+    return lineEl.scrollHeight;
   }
 
-  /// 「超出最大行数就分段依次显示」的控制器，逻辑与 overlay 完全一致。
-  /// 预览区用它还原 OBS 里的真实观感。
-  function createPager(getLineEl, getInnerEl) {
-    const ARM = 400;       // 等文字稳定的时间
-    const MIN_MS = 1600;   // 每段最短停留
-    const PER_CHAR = 55;   // 每段按字数追加的停留时间
-    const MAX_MS = 4500;
-
-    let timer = null;
-    let armTimer = null;
-    let gen = 0;
-
-    function pageCount(lineEl, inner) {
-      const view = lineEl.clientHeight;
-      if (!inner || view <= 0) return 1;
-      return Math.max(1, Math.ceil(inner.scrollHeight / view));
+  function previewFindCut(text, start, maxH) {
+    let lo = start + 1;
+    let hi = text.length;
+    let best = start + 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (previewMeasure(text.slice(start, mid)) <= maxH) {
+        best = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
     }
-
-    function showPage(lineEl, inner, i) {
-      const view = lineEl.clientHeight;
-      if (!inner || view <= 0) return;
-      // 最后一段贴底，否则末尾会拖出半屏空白。
-      const offset = Math.min(i * view, Math.max(0, inner.scrollHeight - view));
-      inner.style.transform = offset > 0 ? "translateY(" + -offset + "px)" : "";
-    }
-
-    function reset() {
-      gen++;
-      if (timer) { clearTimeout(timer); timer = null; }
-      if (armTimer) { clearTimeout(armTimer); armTimer = null; }
-      const inner = getInnerEl();
-      if (inner) inner.style.transform = "";
-    }
-
-    function run() {
-      const lineEl = getLineEl();
-      const inner = getInnerEl();
-      if (!lineEl || !inner) return;
-      if (lineEl.classList.contains("single-line")) return;
-      const total = pageCount(lineEl, inner);
-      if (total <= 1) { showPage(lineEl, inner, 0); return; }
-
-      const myGen = gen;
-      let index = 0;
-      showPage(lineEl, inner, 0);
-
-      const step = () => {
-        if (myGen !== gen) return;
-        if (index >= total - 1) return; // 播完就停，不循环
-        const dur = Math.min(MAX_MS, Math.max(MIN_MS, PER_CHAR * 20));
-        timer = setTimeout(() => {
-          if (myGen !== gen) return;
-          timer = null;
-          index++;
-          showPage(lineEl, inner, index);
-          step();
-        }, dur);
-      };
-      step();
-    }
-
-    function restart() {
-      reset();
-      // 先跟随最新一段，稳定后再从头依次播放。
-      const lineEl = getLineEl();
-      const inner = getInnerEl();
-      if (lineEl && inner) showPage(lineEl, inner, pageCount(lineEl, inner) - 1);
-      if (armTimer) clearTimeout(armTimer);
-      armTimer = setTimeout(() => {
-        armTimer = null;
-        run();
-      }, ARM);
-    }
-
-    return { reset: reset, restart: restart };
+    return best;
   }
 
-  const previewPager = createPager(
-    () => $("preview-line"),
-    () => ensurePreviewInner()
-  );
+  /// 按当前样式把 previewText 渲染成「当前这句」。
+  function renderPreview() {
+    const lineEl = $("preview-line");
+    if (!lineEl) return;
+    if (previewLines <= 1) {
+      lineEl.textContent = previewText;
+      return;
+    }
+    const caption = $("preview-caption");
+    const lh = parseFloat(getComputedStyle(caption).lineHeight) || 0;
+    const maxH = previewLines * lh;
+    if (maxH <= 0) {
+      lineEl.textContent = previewText;
+      return;
+    }
+    if (previewPageStart > previewText.length) previewPageStart = 0;
+    if (previewMeasure(previewText.slice(previewPageStart)) > maxH) {
+      previewPageStart = previewFindCut(previewText, previewPageStart, maxH);
+    }
+    const shown = previewText.slice(previewPageStart);
+    if (lineEl.textContent !== shown) lineEl.textContent = shown;
+  }
+
+  /// 更新预览文本。新句子（不是在上文后面追加）时从头开始显示。
+  function setPreviewText(text, append) {
+    if (!append) previewPageStart = 0;
+    previewText = text || "";
+    renderPreview();
+  }
 
   // Update UI based on selected provider type
   function updateProviderUI() {
@@ -949,18 +908,18 @@
     }
   }
 
-  function showPreview(text) {
-    const el = $("preview-caption");
-    const inner = ensurePreviewInner();
-    if (inner) inner.textContent = text;
-    el.classList.remove("empty");
-    previewScroller.restart();
+  /// append 为 true 表示是在上一句后面继续（partial 流式），
+  /// 否则视为新的一句，从头开始显示。
+  function showPreview(text, append) {
+    setPreviewText(text, append);
+    $("preview-caption").classList.remove("empty");
   }
 
   function clearPreview() {
-    previewPager.reset();
-    const inner = ensurePreviewInner();
-    if (inner) inner.textContent = "";
+    previewText = "";
+    previewPageStart = 0;
+    const lineEl = $("preview-line");
+    if (lineEl) lineEl.textContent = "";
     $("preview-caption").classList.add("empty");
     lastFinalText = "";
     recentSentences.length = 0;
@@ -1075,7 +1034,7 @@
         const cleaned = cleanText(p.line.text || "");
         if (cleaned && !isDuplicate(cleaned)) {
           pendingPartial = cleaned;
-          showPreview(pendingPartial);
+          showPreview(pendingPartial, false);
         }
       } else if (p.type === "partial") {
         const cleaned = cleanText(p.text || "");
@@ -1083,7 +1042,7 @@
           pendingPartial += cleaned;
           // Show partial if it's different enough from last final
           if (!isDuplicate(pendingPartial)) {
-            showPreview(pendingPartial);
+            showPreview(pendingPartial, true);
           }
         }
       } else if (p.type === "final") {
@@ -1091,7 +1050,7 @@
         if (cleaned && !isDuplicate(cleaned)) {
           pendingPartial = cleaned;
           lastFinalText = cleaned;
-          showPreview(pendingPartial);
+          showPreview(pendingPartial, false);
           loadHistory();
         }
       } else if (p.type === "cleared") {

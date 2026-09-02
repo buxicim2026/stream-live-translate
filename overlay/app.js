@@ -1,10 +1,11 @@
 // Browser Source overlay JS.
-//   * 启动时先拉 /api/config，这样 admin 面板「字幕样式 / 背景设置」里的
-//     宽、高、圆角、背景透明度改完保存就生效，不必重新生成浏览器源 URL。
-//   * URL hash（#size=&color=&bg=&bgOpacity=&bgWidth=&bgHeight=&radius=…）
-//     优先级最高，用于覆盖已保存的配置。
-//   * 字幕背景贴合内容；超过「最大行数」的文字不再被省略号吞掉，
-//     而是滚动显示出来（英文新闻、访谈等长句场景）。
+//   * 样式以服务端 /api/config 为权威（保存后经 WebSocket 实时推送）；
+//     URL hash（#size=&color=&bg=…）只作为首帧兜底，会被配置覆盖，
+//     因此 admin 改完样式 OBS 字幕立即生效，无需重新复制浏览器源 URL。
+//   * 字幕实时渲染：模型每吐一个字就立刻显示（不等人把话说完），
+//     追求尽可能低的延迟。
+//   * 超过「最大行数」的部分不再省略，而是直接换到下一句字幕显示，
+//     不做滚动 / 位移。
 //   * 宽 / 高 / 圆角可用 bgWidth / bgHeight / radius 固定。
 
 (function () {
@@ -12,9 +13,10 @@
 
   const captionEl = document.getElementById("caption");
   const lineEl = document.getElementById("caption-line");
-  // 文字放在内层 span 里，靠 transform 上移实现滚动；
-  // 外层 .caption-line 作为固定高度的视口裁掉溢出部分。
-  let textEl = null;
+  // 字幕文字直接写在 #caption-line 上：超出最大行数的部分会换到下一句，
+  // 不做位移，因此不需要「视口 + 内层」那套结构。
+  // textEl 只是给渲染代码用的别名，保持内部写法统一。
+  const textEl = lineEl;
   let currentText = "";
   let hideTimer = null;
   let partialBuffer = "";
@@ -56,18 +58,6 @@
   }
 
   // ---- style -------------------------------------------------------------
-
-  /// 把已有内容包进 .caption-inner。动态创建而非改 index.html，
-  /// 这样即使 OBS 缓存了旧版页面也能正常工作。
-  function ensureInner() {
-    if (textEl) return textEl;
-    const inner = document.createElement("span");
-    inner.className = "caption-inner";
-    while (lineEl.firstChild) inner.appendChild(lineEl.firstChild);
-    lineEl.appendChild(inner);
-    textEl = inner;
-    return inner;
-  }
 
   function hexToRgba(hex, alpha) {
     if (!hex || hex[0] !== "#") return null;
@@ -133,116 +123,78 @@
     const lh = isFinite(lhRaw) && lhRaw > 0 ? lhRaw : (isFinite(fs) ? fs : 48) * 1.25;
     root.setProperty("--caption-max-height", (lines * lh).toFixed(2) + "px");
 
-    // 行数 / 字号变了，分段要重新量。
-    restartPaging();
+    // 行数 / 字号变了，当前这句要重新切。
+    refreshCaption();
   }
 
-  // ---- 长句分段显示 -----------------------------------------------------
-  // 英文新闻、访谈这类长句连「最大行数」都放不下时，既不循环滚动，也不用
-  // 省略号把后半段吞掉：把文字按每 maxLines 行切成若干段，依次显示。
+  // ---- 长句换句显示 -----------------------------------------------------
+  // 英文新闻、访谈这类长句超过「最大行数」时，多出来的部分直接换到下一句
+  // 字幕显示 —— 不做任何滚动或位移动画。
   //
-  // 视口高度正好是「行数 × 行高」，所以按它的整数倍位移就能让每一段都
-  // 完整显示整行，不会出现半行被切掉。
+  // 做法是「分页跟随」：文字一边流式增长一边实时显示（所以半句话就能立刻
+  // 看到），一旦当前这句超过最大行数，就从超出的地方另起一句，字幕内容
+  // 整块替换成新的一句。前面那句在增长过程中已经被实时显示过了，不会丢。
   //
-  // 行为：
-  //   * 流式输出期间跟随最新一段（观众看到的是正在说的内容）；
-  //   * 文字停下来后从头依次播放各段，让被跳过的前半句也有机会看到；
-  //   * 播完停在最后一段，不循环、不回退。
+  // 只有两个 DOM 操作：测量高度 + 写入文本，没有 transform 也没有定时器，
+  // 因此没有延迟累积。
 
-  const PAGE_ARM_DELAY = 400;   // 文字停顿多久才认为这句稳定、可以开始分段
-  const PAGE_MIN_MS = 1600;     // 每段最短停留
-  const PAGE_MS_PER_CHAR = 55;  // 每段按字数追加的停留时间
-  const PAGE_MAX_MS = 4500;
+  let pageStart = 0; // 当前这句在完整文本中的起始字符下标
 
-  let pageTimer = null;
-  let armTimer = null;
-  let pageGen = 0;
-
-  /// 内容一共占几段（每段 = 一屏，即 maxLines 行）。
-  function pageCount() {
-    const view = lineEl.clientHeight;
-    if (!textEl || view <= 0) return 1;
-    return Math.max(1, Math.ceil(textEl.scrollHeight / view));
+  /// 把 s 写进字幕并读出它占多少像素高（写入即测量，省一次 DOM 操作）。
+  function measureHeight(s) {
+    textEl.textContent = s;
+    return textEl.scrollHeight;
   }
 
-  /// 把第 i 段挪进视口。位移是瞬间的，刻意不做过渡动画。
-  function showPage(i) {
-    const view = lineEl.clientHeight;
-    if (!textEl || view <= 0) return;
-    // 最后一段贴着内容底部，否则末尾会拖出半屏空白。
-    const content = textEl.scrollHeight;
-    const offset = Math.min(i * view, Math.max(0, content - view));
-    textEl.style.transform = offset > 0 ? "translateY(" + -offset + "px)" : "";
+  /**
+   * 找换句位置：从 start 起，能塞进一屏的最长片段的结束下标。
+   * 二分查找而非逐字符试排 —— 后者每次 partial 都要几十次强制重排，
+   * 会直接把字幕拖出可感知的延迟。
+   */
+  function findCut(text, start, maxH) {
+    let lo = start + 1;
+    let hi = text.length;
+    let best = start + 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (measureHeight(text.slice(start, mid)) <= maxH) {
+        best = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return best;
   }
 
-  /// 停掉所有排队中的换段动作。gen 变化会让已排队的回调自动作废。
-  function stopPaging() {
-    pageGen++;
-    if (pageTimer) { clearTimeout(pageTimer); pageTimer = null; }
-    if (armTimer) { clearTimeout(armTimer); armTimer = null; }
-  }
-
-  /// 回到第一段并清掉位移。隐藏字幕 / 换字幕都要调用。
-  function resetPaging() {
-    stopPaging();
-    if (textEl) textEl.style.transform = "";
-  }
-
-  /// 流式输出期间显示最新一段。
-  function followLatest() {
+  /// 渲染完整累积文本中「当前这句」。
+  function renderCaption(full) {
     if (!textEl) return;
-    showPage(pageCount() - 1);
+    if (maxLines <= 1) {
+      // 严格单行：交给 CSS 的 text-overflow 出省略号。
+      textEl.textContent = full;
+      return;
+    }
+    const lh = parseFloat(getComputedStyle(captionEl).lineHeight) || 0;
+    const maxH = maxLines * lh;
+    if (maxH <= 0) {
+      textEl.textContent = full;
+      return;
+    }
+    // 文本被替换成更短的内容时下标会越界，回到开头。
+    if (pageStart > full.length) pageStart = 0;
+    // 当前这句放不下了，就从溢出处另起一句（整块替换，不逐行推进，
+    // 所以看起来是「换了一句」而不是在滚动）。
+    if (measureHeight(full.slice(pageStart)) > maxH) {
+      pageStart = findCut(full, pageStart, maxH);
+    }
+    const shown = full.slice(pageStart);
+    if (textEl.textContent !== shown) textEl.textContent = shown;
   }
 
-  /// 文字稳定后从头依次播放各段，播完停在最后一段（不循环）。
-  function startPaging() {
-    if (!textEl || maxLines <= 1) return;
-    const total = pageCount();
-    if (total <= 1) { showPage(0); return; }
-
-    // 分段播放需要时间，顺延一次自动隐藏，否则 4 秒一到就被清掉，
-    // 正好卡在中间某段。
-    if (hideTimer && !hideExtended) {
-      hideExtended = true;
-      const est = total * PAGE_MIN_MS;
-      if (est > HIDE_DELAY) scheduleHide(est - HIDE_DELAY);
-    }
-
-    const gen = pageGen;
-    let index = 0;
-    showPage(0);
-
-    const step = () => {
-      // 期间换了字幕或样式：这一串回调作废。
-      if (gen !== pageGen) return;
-      if (index >= total - 1) return; // 播完就停，不循环
-      const chars = Math.max(1, Math.ceil(currentText.length / total));
-      const dur = Math.min(
-        PAGE_MAX_MS,
-        Math.max(PAGE_MIN_MS, chars * PAGE_MS_PER_CHAR)
-      );
-      pageTimer = setTimeout(() => {
-        if (gen !== pageGen) return;
-        pageTimer = null;
-        index++;
-        showPage(index);
-        step();
-      }, dur);
-    };
-    step();
-  }
-
-  /// 每次文字变化 / 样式变化都走这里：先跟随最新，稳定后再分段播放。
-  function restartPaging() {
-    stopPaging();
-    hideExtended = false;
-    followLatest();
-    if (currentText) {
-      armTimer = setTimeout(() => {
-        armTimer = null;
-        startPaging();
-      }, PAGE_ARM_DELAY);
-    }
+  /// 文字或行数/字号变化后重画当前这句。
+  function refreshCaption() {
+    renderCaption(currentText);
   }
 
   // ---- 性能模式 ---------------------------------------------------------
@@ -336,24 +288,21 @@
     if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
     const line = toSingleLine(text);
     currentText = line;
-    // 只做病态输入兜底；超出的部分不再截断，交给分段显示。
-    ensureInner().textContent = line.length > 1000 ? line.slice(0, 1000) + "…" : line;
     captionEl.classList.remove("empty");
     captionEl.classList.add("show");
-    restartPaging();
+    // 病态输入兜底；超出的部分由 renderCaption 换到下一句显示。
+    renderCaption(line.length > 1000 ? line.slice(0, 1000) + "…" : line);
   }
 
   function hide() {
     captionEl.classList.add("empty");
     captionEl.classList.remove("show");
-    resetPaging();
+    pageStart = 0;
     if (textEl) textEl.textContent = "";
   }
 
   const HIDE_DELAY = 4000;   // 没有新内容时字幕自动隐藏的时间
-  let hideExtended = false;  // 长句顺延过一次就不再顺延，避免字幕一直不消失
 
-  /// extraMs：需要分段播放的长句会把隐藏时间往后顺延（见 startPaging）。
   function scheduleHide(extraMs) {
     if (hideTimer) clearTimeout(hideTimer);
     hideTimer = setTimeout(() => {
@@ -363,12 +312,16 @@
   }
 
   function appendPartial(delta) {
+    if (!delta) return;
+    // 上一句已经收尾（finalize 会清空 buffer），这是新的一句，从头开始显示。
+    if (partialBuffer.length === 0) pageStart = 0;
     partialBuffer += delta;
     lastPartialAt = Date.now();
-    if (cleanText(delta)) {
-      show(partialBuffer);
-      scheduleHide();
-    }
+    // 不做任何过滤，直接渲染：cleanText 的水印词表是针对整句设计的，
+    // 套在流式片段上会误伤（delta 恰好是 "live" / "AI" 就被整段丢掉），
+    // 既吞内容又让人误以为字幕要等说完才出。水印只在 finalize 时清理。
+    show(partialBuffer);
+    scheduleHide();
   }
 
   function finalize(text) {
@@ -438,7 +391,6 @@
   }
 
   async function init() {
-    ensureInner();
     initPerfMode();
     // 顺序很关键：先 hash（旧版留下的 URL 参数）再 /api/config，
     // 让服务端配置成为唯一权威来源 —— 这样 admin 改动即时生效，
@@ -446,11 +398,11 @@
     parseHash();
     await loadConfig();
     connectWS();
-    // 字体加载完成会改变行高，重新量一次滚动距离。
+    // 字体加载完成会改变行高，重新切一次当前这句。
     if (document.fonts && document.fonts.ready) {
-      document.fonts.ready.then(restartPaging);
+      document.fonts.ready.then(refreshCaption);
     }
-    window.addEventListener("resize", restartPaging);
+    window.addEventListener("resize", refreshCaption);
   }
 
   init();
