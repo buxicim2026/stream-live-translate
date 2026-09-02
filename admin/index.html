@@ -41,16 +41,15 @@
       </label>
       <div id="provider-hint-box" class="provider-hint-box">
         <strong>💡 通义 Qwen API</strong><br />
-        推荐使用 <code>qwen3.5-livetranslate-flash-realtime</code> 模型，支持实时语音同传翻译。
+        只能用 qwen3 系列语音（多模态）Realtime 实时模型；不能用非语音、非实时模型运行。
       </div>
       <label><span data-i18n="llm.model">Model（模型名称）</span>
         <input id="model" type="text" list="model-presets" placeholder="qwen3.5-livetranslate-flash-realtime" />
         <datalist id="model-presets">
           <option value="qwen3.5-livetranslate-flash-realtime">同传翻译（推荐，多语言→目标语言）</option>
-          <option value="qwen-asr-flash-realtime">通义语音识别（ASR）</option>
-          <option value="qwen-audio-realtime-plus">Qwen-Audio 实时识别</option>
-          <option value="qwen-audio-3.0-realtime-flash">Qwen-Audio 3.0 实时</option>
-          <option value="qwen-audio-3.0-asr-flash-streaming">Qwen-Audio 3.0 流式识别</option>
+          <option value="qwen3-asr-flash-realtime">实时语音识别（ASR）</option>
+          <option value="qwen-audio-3.0-realtime-flash">Qwen-Audio 3.0 实时（语音对话）</option>
+          <option value="qwen-audio-realtime-plus">Qwen-Audio Realtime Plus（语音对话）</option>
         </datalist>
       </label>
       <label><span data-i18n="llm.apikey">API Key</span>

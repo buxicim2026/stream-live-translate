@@ -395,14 +395,13 @@
   const PROVIDER_HINTS = {
     zh: {
       "qwen": {
-        boxHtml: `<strong>💡 通义 Qwen API</strong><br />推荐使用 <code>qwen3.5-livetranslate-flash-realtime</code> 模型，支持实时语音同传翻译。`,
+        boxHtml: `<strong>💡 通义 Qwen API</strong><br />只能用 qwen3 系列<strong>语音（多模态）Realtime</strong> 实时模型，不能用非语音、非实时模型运行。同传翻译用 <code>qwen3.5-livetranslate-flash-realtime</code>；实时识别转写用 <code>qwen3-asr-flash-realtime</code> 或 <code>qwen-audio-3.0-realtime-flash</code>。`,
         modelPlaceholder: "qwen3.5-livetranslate-flash-realtime",
         modelSuggestions: [
           { value: "qwen3.5-livetranslate-flash-realtime", label: "同传翻译（推荐，多语言→目标语言）" },
-          { value: "qwen3-asr-flash-realtime", label: "通义语音识别（ASR）" },
-          { value: "qwen-audio-realtime-plus", label: "Qwen-Audio 实时识别" },
-          { value: "qwen-audio-3.0-realtime-flash", label: "Qwen-Audio 3.0 实时" },
-          { value: "qwen-audio-3.0-asr-flash-streaming", label: "Qwen-Audio 3.0 流式识别" }
+          { value: "qwen3-asr-flash-realtime", label: "实时语音识别（ASR，边说边出字幕）" },
+          { value: "qwen-audio-3.0-realtime-flash", label: "Qwen-Audio 3.0 实时（语音对话）" },
+          { value: "qwen-audio-realtime-plus", label: "Qwen-Audio Realtime Plus（语音对话）" }
         ],
         endpointPlaceholder: "留空使用内置默认地址（wss://dashscope.aliyuncs.com/api-ws/v1/realtime）",
         endpointDefault: "",
@@ -443,14 +442,13 @@
 
     en: {
       "qwen": {
-        boxHtml: `<strong>💡 Qwen API</strong><br />Recommended model: <code>qwen3.5-livetranslate-flash-realtime</code> — real-time simultaneous speech translation.`,
+        boxHtml: `<strong>💡 Qwen API</strong><br />Only qwen3 <strong>speech (multimodal) Realtime</strong> models work — non-speech / non-realtime models cannot run. Use <code>qwen3.5-livetranslate-flash-realtime</code> for simultaneous translation, or <code>qwen3-asr-flash-realtime</code> / <code>qwen-audio-3.0-realtime-flash</code> for live recognition.`,
         modelPlaceholder: "qwen3.5-livetranslate-flash-realtime",
         modelSuggestions: [
           { value: "qwen3.5-livetranslate-flash-realtime", label: "Simultaneous translation (recommended, multi-language → target)" },
-          { value: "qwen3-asr-flash-realtime", label: "Qwen speech recognition (ASR)" },
-          { value: "qwen-audio-realtime-plus", label: "Qwen-Audio realtime" },
-          { value: "qwen-audio-3.0-realtime-flash", label: "Qwen-Audio 3.0 realtime" },
-          { value: "qwen-audio-3.0-asr-flash-streaming", label: "Qwen-Audio 3.0 streaming ASR" }
+          { value: "qwen3-asr-flash-realtime", label: "Live speech recognition (ASR, captions while speaking)" },
+          { value: "qwen-audio-3.0-realtime-flash", label: "Qwen-Audio 3.0 realtime (speech conversation)" },
+          { value: "qwen-audio-realtime-plus", label: "Qwen-Audio Realtime Plus (speech conversation)" }
         ],
         endpointPlaceholder: "Leave empty for the built-in default (wss://dashscope.aliyuncs.com/api-ws/v1/realtime)",
         endpointDefault: "",

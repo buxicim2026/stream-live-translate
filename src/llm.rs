@@ -96,6 +96,15 @@ pub mod qwen {
             if cfg.api_key.is_empty() {
                 return Err(anyhow!("Qwen API key is empty; please fill it in the admin panel"));
             }
+            // Fun-ASR 流式识别（qwen-audio-*-asr-flash-streaming 等）走的是另一套
+            // WebSocket 协议，与本插件使用的 DashScope Realtime（/api-ws/v1/realtime）
+            // 不兼容，直接给出明确提示，而不是连接后各种报错。
+            if cfg.model.to_lowercase().contains("streaming") {
+                return Err(anyhow!(
+                    "模型 {} 属于 Fun-ASR 流式识别(Streaming)接口，与插件使用的 DashScope Realtime 协议不兼容，无法出字幕。请改用 Realtime 语音模型：qwen3.5-livetranslate-flash-realtime（同传翻译）、qwen3-asr-flash-realtime / qwen-audio-3.0-realtime-flash（实时识别）等。",
+                    cfg.model
+                ));
+            }
             Ok(Self { cfg, endpoint })
         }
     }
@@ -170,6 +179,10 @@ pub mod qwen {
                     // pending：当前这一轮/这一句服务端给到的「累计稳定文本」。
                     // 用来把累积类事件 diff 成「只推新增」，避免重复 append。
                     let mut pending = String::new();
+                    // 通道隔离：livetranslate 走“译文”通道；其它（ASR / 语音识别 /
+                    // 语音对话模型）只显示源语言转写通道，把模型自己的闲聊回应
+                    // （response.text.* / audio_transcript.*）丢掉，避免字幕出现废话。
+                    let transcribe_channel = asr_mode;
                     while let Some(msg) = read_half.next().await {
                         let msg = match msg {
                             Ok(m) => m,
@@ -181,7 +194,7 @@ pub mod qwen {
                         match msg {
                             Message::Text(t) => {
                                 if let Ok(ev) = serde_json::from_str::<QwenEvent>(&t) {
-                                    apply_qwen_event(&ev, &sink, &mut pending);
+                                    apply_qwen_event(&ev, &sink, &mut pending, transcribe_channel);
                                 } else {
                                     debug!(payload=%t, "unparsed qwen event");
                                 }
@@ -378,55 +391,68 @@ pub mod qwen {
   /// 把一个服务端事件应用成字幕更新。
   /// `pending` 记录当前这一句服务端给出的「累计稳定文本」，累积类事件
   /// （text / stash / transcript）据此只推送新增部分，避免重复。
-  fn apply_qwen_event(ev: &QwenEvent, sink: &SubtitleSink, pending: &mut String) {
-    match ev {
-        // ---- 纯增量事件：直接把新增片段交给字幕 ----
-        QwenEvent::ResponseTextDelta { delta } | QwenEvent::AudioTranscriptDelta { delta } => {
-            if let Some(d) = delta {
-                if !d.is_empty() {
-                    sink.push(SubtitleEvent::Partial(d.clone()));
-                    pending.push_str(d);
+  ///
+  /// `transcribe == true`（非 livetranslate 的 ASR / 语音识别 / 语音对话类
+  /// 模型）：只监听源语言转写事件 input_audio_transcription.*，丢弃模型的
+  /// response.text.* / audio_transcript.*（那是模型自己的闲聊回应，不是
+  /// 说话人内容，显示出来就是“废话”）。
+  /// `transcribe == false`（livetranslate 同传模型）：只监听译文事件
+  /// response.text.* / audio_transcript.*，转写通道本就未开启。
+  fn apply_qwen_event(
+    ev: &QwenEvent,
+    sink: &SubtitleSink,
+    pending: &mut String,
+    transcribe: bool,
+  ) {
+    if transcribe {
+        // ---- 转写通道：ASR / 语音识别类模型 ----
+        match ev {
+            QwenEvent::TranscriptionDelta { text } => {
+                if let Some(t) = text {
+                    if !t.is_empty() {
+                        sink.push(SubtitleEvent::Partial(t.clone()));
+                        pending.push_str(t);
+                    }
                 }
             }
-        }
-        QwenEvent::TranscriptionDelta { text } => {
-            if let Some(t) = text {
-                if !t.is_empty() {
-                    sink.push(SubtitleEvent::Partial(t.clone()));
-                    pending.push_str(t);
+            QwenEvent::TranscriptionText { text, stash } => {
+                if let Some(s) = text.as_deref().or(stash.as_deref()) {
+                    accumulate(s, sink, pending);
                 }
             }
-        }
-
-        // ---- 累积稳定文本：只推送相对 pending 新增的部分 ----
-        QwenEvent::ResponseTextText { text, stash } => {
-            if let Some(s) = text.as_deref().or(stash.as_deref()) {
-                accumulate(s, sink, pending);
+            QwenEvent::Completed { transcript } => {
+                finalize_sentence(transcript.as_deref().unwrap_or("").trim(), sink, pending);
             }
-        }
-        QwenEvent::AudioTranscriptText { text, stash } => {
-            if let Some(s) = text.as_deref().or(stash.as_deref()) {
-                accumulate(s, sink, pending);
+            QwenEvent::Error { error } => {
+                warn!(?error, "qwen error event");
             }
+            _ => {}
         }
-        QwenEvent::TranscriptionText { text, stash } => {
-            if let Some(s) = text.as_deref().or(stash.as_deref()) {
-                accumulate(s, sink, pending);
+    } else {
+        // ---- 译文通道：livetranslate 同传翻译 ----
+        match ev {
+            QwenEvent::ResponseTextDelta { delta } | QwenEvent::AudioTranscriptDelta { delta } => {
+                if let Some(d) = delta {
+                    if !d.is_empty() {
+                        sink.push(SubtitleEvent::Partial(d.clone()));
+                        pending.push_str(d);
+                    }
+                }
             }
+            QwenEvent::ResponseTextText { text, stash }
+            | QwenEvent::AudioTranscriptText { text, stash } => {
+                if let Some(s) = text.as_deref().or(stash.as_deref()) {
+                    accumulate(s, sink, pending);
+                }
+            }
+            QwenEvent::ResponseTextDone { text } | QwenEvent::AudioTranscriptDone { text } => {
+                finalize_sentence(text.as_deref().unwrap_or("").trim(), sink, pending);
+            }
+            QwenEvent::Error { error } => {
+                warn!(?error, "qwen error event");
+            }
+            _ => {}
         }
-
-        // ---- 一段完整结果：收尾并进历史 ----
-        QwenEvent::ResponseTextDone { text } | QwenEvent::AudioTranscriptDone { text } => {
-            finalize_sentence(text.as_deref().unwrap_or("").trim(), sink, pending);
-        }
-        QwenEvent::Completed { transcript } => {
-            finalize_sentence(transcript.as_deref().unwrap_or("").trim(), sink, pending);
-        }
-
-        QwenEvent::Error { error } => {
-            warn!(?error, "qwen error event");
-        }
-        _ => {}
     }
   }
 
