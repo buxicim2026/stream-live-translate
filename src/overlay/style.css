@@ -73,7 +73,7 @@ body.position-middle { align-items: center; }
 
 /* 视口：高度贴合内容，但最多 --caption-max-height（= 最大行数 × 行高，
    由 JS 计算）。短句时背景仍贴合文字，长句才撑到上限。
-   超出上限的部分不再用省略号吞掉，而是由 .caption-inner 上移滚动显示。 */
+   超出上限的部分不再用省略号吞掉，而是由 JS 按段依次显示出来。 */
 .caption-line {
   display: block;
   min-width: 0;
@@ -83,21 +83,19 @@ body.position-middle { align-items: center; }
 }
 
 /* 承载文字的内层。transform 不影响布局，所以外层视口高度保持稳定，
-   滚动时背景高度不会跳动。时长由 JS 按滚动距离下发。 */
+   换段时背景高度不会跳动。
+   刻意不设 transition：分段是「整段替换」而不是滚动，加了过渡就又会
+   变成用户不想要的来回滚动效果。 */
 .caption-inner {
   display: block;
   width: 100%;
-  transition: transform 260ms linear;
 }
-/* 滚动中把文字提为独立合成层，避免每帧重绘文字 */
-.caption-line.scrolling .caption-inner { will-change: transform; }
 
-/* 最大行数 = 1：严格单行，不折行；超出用省略号（无垂直滚动）。 */
+/* 最大行数 = 1：严格单行，不折行；超出用省略号（无分段）。 */
 .caption-line.single-line {
   max-height: none;
 }
 .caption-line.single-line .caption-inner {
-  transition: none;
   transform: none !important;
   white-space: nowrap;
   overflow: hidden;

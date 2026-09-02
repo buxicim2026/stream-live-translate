@@ -10,6 +10,9 @@
 //!   GET  /api/status            -> { running, audio, llm, obs, last_error }
 //!   GET  /api/subtitles         -> current + history
 //!   POST /api/subtitles/clear   -> clear current line
+//!   GET  /api/locale            -> { language } — host OS UI language
+//!                                  ("zh" | "en"), used by the admin panel
+//!                                  to pick its interface language
 //!   WS   /ws/subtitles          -> live subtitle event stream
 
 use std::net::SocketAddr;
@@ -56,6 +59,7 @@ fn build_router(state: Arc<AppState>, static_dir: PathBuf) -> Router {
         .route("/subtitles", get(get_subtitles))
         .route("/subtitles/clear", post(clear_subtitles))
         .route("/restart", post(restart_pipeline))
+        .route("/locale", get(get_locale))
         .with_state(state.clone());
 
     // Disk directory for the optional bundled binaries (live-reload case).
@@ -318,6 +322,23 @@ async fn get_devices() -> Response {
         )
             .into_response(),
     }
+}
+
+/// Host OS UI language, normalised to the two languages the panel ships
+/// with ("zh" | "en"). The panel uses this to pick its language with no
+/// user-facing toggle — an English Windows/macOS/Linux gets English.
+///
+/// Falls back to English for anything unrecognised, which is also what a
+/// headless/container host (no locale set) should get.
+fn ui_language() -> &'static str {
+    match sys_locale::get_locale() {
+        Some(locale) if locale.to_ascii_lowercase().starts_with("zh") => "zh",
+        _ => "en",
+    }
+}
+
+async fn get_locale() -> Response {
+    axum::Json(serde_json::json!({ "language": ui_language() })).into_response()
 }
 
 #[derive(serde::Serialize)]

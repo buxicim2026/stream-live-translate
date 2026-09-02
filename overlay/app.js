@@ -133,99 +133,116 @@
     const lh = isFinite(lhRaw) && lhRaw > 0 ? lhRaw : (isFinite(fs) ? fs : 48) * 1.25;
     root.setProperty("--caption-max-height", (lines * lh).toFixed(2) + "px");
 
-    // 行数 / 字号变了，滚动距离要重新量。
-    restartScroll();
+    // 行数 / 字号变了，分段要重新量。
+    restartPaging();
   }
 
-  // ---- 溢出滚动 ---------------------------------------------------------
-  // 英文新闻、访谈这类长句连「最大行数」都放不下时，旧版会用省略号把后半段
-  // 直接吞掉。这里改成字幕滚动：先在开头停一下，再匀速把后半段「吐」出来，
-  // 滚到底停一下后回到开头循环，保证整句都能看到。
+  // ---- 长句分段显示 -----------------------------------------------------
+  // 英文新闻、访谈这类长句连「最大行数」都放不下时，既不循环滚动，也不用
+  // 省略号把后半段吞掉：把文字按每 maxLines 行切成若干段，依次显示。
+  //
+  // 视口高度正好是「行数 × 行高」，所以按它的整数倍位移就能让每一段都
+  // 完整显示整行，不会出现半行被切掉。
+  //
+  // 行为：
+  //   * 流式输出期间跟随最新一段（观众看到的是正在说的内容）；
+  //   * 文字停下来后从头依次播放各段，让被跳过的前半句也有机会看到；
+  //   * 播完停在最后一段，不循环、不回退。
 
-  const SCROLL_ARM_DELAY = 400;    // 流式输出期间等文字稳定，防止动画被打断成抖动
-  const SCROLL_HOLD_TOP = 1000;    // 停在开头的时间
-  const SCROLL_HOLD_BOTTOM = 1200; // 滚到底后的停留时间
-  const SCROLL_SPEED = 40;         // 滚动速度 px/s
-  const SCROLL_MIN_MS = 400;
-  const SCROLL_MAX_MS = 5000;
-  const SCROLL_EPSILON = 2;        // 小于 2px 视为没溢出（亚像素误差）
+  const PAGE_ARM_DELAY = 400;   // 文字停顿多久才认为这句稳定、可以开始分段
+  const PAGE_MIN_MS = 1600;     // 每段最短停留
+  const PAGE_MS_PER_CHAR = 55;  // 每段按字数追加的停留时间
+  const PAGE_MAX_MS = 4500;
 
-  let scrollTimer = null;
+  let pageTimer = null;
   let armTimer = null;
-  let scrollGen = 0;
+  let pageGen = 0;
 
-  /// 立刻停下滚动并回到开头。换字幕 / 隐藏字幕 / 改样式都要调用。
-  function resetScroll() {
-    scrollGen++;
-    if (scrollTimer) { clearTimeout(scrollTimer); scrollTimer = null; }
+  /// 内容一共占几段（每段 = 一屏，即 maxLines 行）。
+  function pageCount() {
+    const view = lineEl.clientHeight;
+    if (!textEl || view <= 0) return 1;
+    return Math.max(1, Math.ceil(textEl.scrollHeight / view));
+  }
+
+  /// 把第 i 段挪进视口。位移是瞬间的，刻意不做过渡动画。
+  function showPage(i) {
+    const view = lineEl.clientHeight;
+    if (!textEl || view <= 0) return;
+    // 最后一段贴着内容底部，否则末尾会拖出半屏空白。
+    const content = textEl.scrollHeight;
+    const offset = Math.min(i * view, Math.max(0, content - view));
+    textEl.style.transform = offset > 0 ? "translateY(" + -offset + "px)" : "";
+  }
+
+  /// 停掉所有排队中的换段动作。gen 变化会让已排队的回调自动作废。
+  function stopPaging() {
+    pageGen++;
+    if (pageTimer) { clearTimeout(pageTimer); pageTimer = null; }
     if (armTimer) { clearTimeout(armTimer); armTimer = null; }
-    if (textEl) {
-      textEl.style.transition = "none";
-      textEl.style.transform = "translateY(0)";
-    }
-    lineEl.classList.remove("scrolling");
   }
 
-  /// 视口外还藏着多少像素的文字（= 需要滚动的距离）。
-  function overflowDistance() {
-    if (!textEl) return 0;
-    return Math.max(0, Math.round(textEl.scrollHeight - lineEl.clientHeight));
+  /// 回到第一段并清掉位移。隐藏字幕 / 换字幕都要调用。
+  function resetPaging() {
+    stopPaging();
+    if (textEl) textEl.style.transform = "";
   }
 
-  /// 文字稳定后再量距离开始滚动：流式输出每来一个 delta 就重新计时。
-  function scheduleScroll() {
-    if (armTimer) clearTimeout(armTimer);
-    armTimer = setTimeout(() => {
-      armTimer = null;
-      startScroll();
-    }, SCROLL_ARM_DELAY);
+  /// 流式输出期间显示最新一段。
+  function followLatest() {
+    if (!textEl) return;
+    showPage(pageCount() - 1);
   }
 
-  function restartScroll() {
-    hideExtended = false;
-    resetScroll();
-    if (currentText) scheduleScroll();
-  }
-
-  function scrollAfter(ms, fn) {
-    const gen = scrollGen;
-    if (scrollTimer) clearTimeout(scrollTimer);
-    scrollTimer = setTimeout(() => {
-      // 期间换了字幕/样式：这一串回调作废。
-      if (gen !== scrollGen) return;
-      scrollTimer = null;
-      fn();
-    }, ms);
-  }
-
-  function startScroll() {
+  /// 文字稳定后从头依次播放各段，播完停在最后一段（不循环）。
+  function startPaging() {
     if (!textEl || maxLines <= 1) return;
-    const distance = overflowDistance();
-    if (distance <= SCROLL_EPSILON) return; // 没溢出就保持原位
-    lineEl.classList.add("scrolling");
+    const total = pageCount();
+    if (total <= 1) { showPage(0); return; }
 
-    const dur = Math.min(
-      SCROLL_MAX_MS,
-      Math.max(SCROLL_MIN_MS, Math.round((distance / SCROLL_SPEED) * 1000))
-    );
-    // 长句要靠滚动才看得全：顺延一次自动隐藏时间，保证至少播完一轮，
-    // 否则会被 4 秒的自动隐藏清掉，正好卡在「吐字」的中途。
+    // 分段播放需要时间，顺延一次自动隐藏，否则 4 秒一到就被清掉，
+    // 正好卡在中间某段。
     if (hideTimer && !hideExtended) {
       hideExtended = true;
-      const cycle = SCROLL_HOLD_TOP + dur + SCROLL_HOLD_BOTTOM;
-      if (cycle > HIDE_DELAY) scheduleHide(cycle - HIDE_DELAY);
+      const est = total * PAGE_MIN_MS;
+      if (est > HIDE_DELAY) scheduleHide(est - HIDE_DELAY);
     }
-    // 开头停留 → 匀速滚到底 → 底部停留 → 回到开头 → 循环
-    scrollAfter(SCROLL_HOLD_TOP, () => {
-      textEl.style.transition = `transform ${dur}ms linear`;
-      textEl.style.transform = `translateY(${-distance}px)`;
-      scrollAfter(dur + SCROLL_HOLD_BOTTOM, () => {
-        const back = Math.max(240, Math.round(dur * 0.5));
-        textEl.style.transition = `transform ${back}ms ease-out`;
-        textEl.style.transform = "translateY(0)";
-        scrollAfter(back + SCROLL_HOLD_TOP, startScroll);
-      });
-    });
+
+    const gen = pageGen;
+    let index = 0;
+    showPage(0);
+
+    const step = () => {
+      // 期间换了字幕或样式：这一串回调作废。
+      if (gen !== pageGen) return;
+      if (index >= total - 1) return; // 播完就停，不循环
+      const chars = Math.max(1, Math.ceil(currentText.length / total));
+      const dur = Math.min(
+        PAGE_MAX_MS,
+        Math.max(PAGE_MIN_MS, chars * PAGE_MS_PER_CHAR)
+      );
+      pageTimer = setTimeout(() => {
+        if (gen !== pageGen) return;
+        pageTimer = null;
+        index++;
+        showPage(index);
+        step();
+      }, dur);
+    };
+    step();
+  }
+
+  /// 每次文字变化 / 样式变化都走这里：先跟随最新，稳定后再分段播放。
+  function restartPaging() {
+    stopPaging();
+    hideExtended = false;
+    followLatest();
+    if (currentText) {
+      armTimer = setTimeout(() => {
+        armTimer = null;
+        startPaging();
+      }, PAGE_ARM_DELAY);
+    }
   }
 
   // ---- 性能模式 ---------------------------------------------------------
@@ -319,24 +336,24 @@
     if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
     const line = toSingleLine(text);
     currentText = line;
-    // 只做病态输入兜底；超出的部分不再截断，交给滚动显示。
+    // 只做病态输入兜底；超出的部分不再截断，交给分段显示。
     ensureInner().textContent = line.length > 1000 ? line.slice(0, 1000) + "…" : line;
     captionEl.classList.remove("empty");
     captionEl.classList.add("show");
-    restartScroll();
+    restartPaging();
   }
 
   function hide() {
     captionEl.classList.add("empty");
     captionEl.classList.remove("show");
-    resetScroll();
+    resetPaging();
     if (textEl) textEl.textContent = "";
   }
 
   const HIDE_DELAY = 4000;   // 没有新内容时字幕自动隐藏的时间
   let hideExtended = false;  // 长句顺延过一次就不再顺延，避免字幕一直不消失
 
-  /// extraMs：需要滚动的长句会把隐藏时间往后顺延（见 startScroll）。
+  /// extraMs：需要分段播放的长句会把隐藏时间往后顺延（见 startPaging）。
   function scheduleHide(extraMs) {
     if (hideTimer) clearTimeout(hideTimer);
     hideTimer = setTimeout(() => {
@@ -431,9 +448,9 @@
     connectWS();
     // 字体加载完成会改变行高，重新量一次滚动距离。
     if (document.fonts && document.fonts.ready) {
-      document.fonts.ready.then(restartScroll);
+      document.fonts.ready.then(restartPaging);
     }
-    window.addEventListener("resize", restartScroll);
+    window.addEventListener("resize", restartPaging);
   }
 
   init();

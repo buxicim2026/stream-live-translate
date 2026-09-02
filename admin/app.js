@@ -8,6 +8,292 @@
 
   const $ = (id) => document.getElementById(id);
 
+  // ---- i18n ---------------------------------------------------------------
+  // 界面语言自动跟随**电脑系统语言**（服务端 /api/locale 检测），不提供手动
+  // 切换按钮：英文系统打开就是英文，中文系统打开就是中文。
+  //
+  // 元素通过 data-i18n（纯文本）/ data-i18n-html（含标签）/ data-i18n-ph
+  // （placeholder）/ data-i18n-title（title）声明自己用哪条文案。
+
+  const I18N = {
+    zh: {
+      "app.title": "Stream Live Translate · 控制台",
+
+      "status.audio": "音频",
+      "status.llm": "大模型",
+      "status.obs": "OBS",
+      "status.checking": "检测中…",
+      "status.running": "● 管线运行中",
+      "status.stopped": "● 管线未运行",
+
+      "perf.btn": "切换到性能模式",
+      "perf.btn.active": "切换到液态玻璃",
+      "perf.title": "关闭液态玻璃特效（极光动画、毛玻璃模糊、高光扫动），降低集显占用",
+      "perf.title.active": "当前为性能模式（已关闭液态玻璃特效）。点击恢复液态玻璃效果。",
+
+      "sec.llm": "1. 大模型",
+      "sec.audio": "2. 音频输入",
+      "sec.obs": "3. OBS 集成",
+      "sec.style": "4. 字幕样式",
+      "sec.preview": "5. 实时字幕预览",
+      "sec.history": "6. 翻译结果历史",
+
+      "llm.hint": "填入你自己的大模型 API Key。所有内容只在本地保存。",
+      "llm.provider": "API 服务",
+      "llm.provider.qwen": "通义 Qwen API（推荐）",
+      "llm.provider.online": "其它在线 API（GPT / Gemini / 火山引擎 / 讯飞等）",
+      "llm.provider.local": "本机部署 API（Ollama / LocalAI 等）",
+      "llm.provider.mock": "模拟模式（不消耗额度）",
+      "llm.model": "Model（模型名称）",
+      "llm.apikey": "API Key",
+      "llm.baseurl": "Base URL（接口地址）",
+      "llm.baseurl.ph": "留空使用内置默认地址",
+      "llm.target": "翻译目标语言",
+      "llm.translate_zh": "对中文也调用翻译（默认否，节省 token）",
+
+      "lang.zh": "中文",
+      "lang.en": "英语",
+      "lang.fr": "法语",
+      "lang.ja": "日语",
+      "lang.ko": "韩语",
+      "lang.es": "西班牙语",
+
+      "audio.hint": "系统音频环回 = 抓取 OBS 当前听到的声音；麦克风 = 抓指定输入设备。",
+      "audio.mode": "模式",
+      "audio.mode.obs": "OBS 插件送音（插件模式下自动使用，请勿更改）",
+      "audio.mode.system": "系统音频环回（独立运行时）",
+      "audio.mode.device": "指定输入/输出设备",
+      "audio.locked": "🔒 引擎由 OBS 插件启动，音频由插件直接送入，模式已锁定。",
+      "audio.device": "设备",
+      "audio.device.default": "（默认）",
+      "audio.tag.input": "输入",
+      "audio.tag.output": "输出",
+      "audio.sck": "macOS 使用 ScreenCaptureKit（需要授予“屏幕录制”权限）",
+
+      "obs.hint": "插件自动连接本机 OBS（obs-websocket v5），可把字幕同步写入一个“Subtitles”文本源。",
+      "obs.auto": "启动时自动连接",
+      "obs.host": "OBS WebSocket 地址",
+      "obs.port": "OBS 端口",
+      "obs.password": "OBS 密码（如果开启了）",
+      "obs.dockhint.a": "想把控制台钉到 OBS 侧边栏？OBS → 顶部菜单",
+      "obs.dockhint.tools": "工具",
+      "obs.dockhint.arrow": "→",
+      "obs.dockhint.docks": "自定义浏览器停靠面板 (Custom Browser Docks)",
+      "obs.dockhint.then": "→ 填入",
+      "obs.dockhint.name": "，名称随意。",
+
+      "style.hint": "保存后 OBS 字幕<b>立即生效</b>，无需重新复制下方 URL。",
+      "style.size": "字体大小 (px)",
+      "style.maxlines": "最大行数",
+      "style.maxlines.note": "行数按需增长：短句一行，放不下自动折到 2/3/4 行。<b>超出上限不再省略，改为自动分段依次显示</b>（英文新闻、访谈等长句场景）。填 1 = 严格单行 + 省略号。",
+      "style.bgsize": "背景尺寸（px）",
+      "style.width": "宽度",
+      "style.height": "高度",
+      "style.radius": "圆角",
+      "style.opacity": "背景透明度",
+      "style.color": "颜色",
+      "style.bg": "背景",
+      "style.position": "位置",
+      "style.pos.bottom": "底部",
+      "style.pos.top": "顶部",
+      "style.pos.middle": "中间",
+      "style.animation": "动画",
+      "style.anim.typewriter": "打字机",
+      "style.anim.fade": "淡入淡出",
+      "style.anim.slide": "滑入",
+
+      "preview.save": "保存配置",
+      "preview.restart": "重启管线",
+      "preview.clear": "清空字幕",
+
+      "overlay.url.label": "OBS 字幕源 URL（复制到 OBS 浏览器源）",
+      "overlay.sizehint": "OBS 浏览器源推荐 1920×540 的尺寸",
+
+      "footer": "本插件由不息传播制作",
+
+      "config.path": "配置文件：",
+      "err.prefix": "❗ ",
+      "err.running": "✅ 管线运行中",
+      "err.obs": "⚠️ OBS 未连接：",
+      "err.obs.tail": "（请确认 OBS 已启动，且 工具 → WebSocket 服务器设置 已开启）",
+
+      "toast.saving": "保存中…",
+      "toast.savefail": "保存失败：",
+      "toast.saved": "✅ 配置已保存并生效（管线已重启）",
+      "toast.mismatch": "⚠️ 已保存，但读回内容不一致，请检查配置文件权限",
+      "toast.needkey": "请先填写 API Key",
+      "toast.keyurl": "API Key 填成了网址！Key 是以 sk- 开头的密钥",
+      "toast.qwenurl": "Base URL 不正确：DashScope Realtime 需要 WebSocket 地址（wss://...），建议留空使用内置默认",
+      "toast.onlineurl": "Base URL 必须是 WebSocket 地址（wss:// 开头）",
+      "toast.localneedep": "请填写本机部署 API 的地址，例如 ws://localhost:11434/v1/realtime",
+      "toast.localurl": "本机 API 地址必须是 WebSocket 地址（ws:// 开头）",
+    },
+
+    en: {
+      "app.title": "Stream Live Translate · Console",
+
+      "status.audio": "Audio",
+      "status.llm": "Model",
+      "status.obs": "OBS",
+      "status.checking": "Checking…",
+      "status.running": "● Pipeline running",
+      "status.stopped": "● Pipeline stopped",
+
+      "perf.btn": "Switch to Performance Mode",
+      "perf.btn.active": "Switch to Liquid Glass",
+      "perf.title": "Turn off liquid-glass effects (aurora animation, blur, sheen) to reduce load on integrated GPUs",
+      "perf.title.active": "Performance mode is on (liquid-glass effects disabled). Click to restore liquid glass.",
+
+      "sec.llm": "1. AI Model",
+      "sec.audio": "2. Audio Input",
+      "sec.obs": "3. OBS Integration",
+      "sec.style": "4. Subtitle Style",
+      "sec.preview": "5. Live Preview",
+      "sec.history": "6. Translation History",
+
+      "llm.hint": "Enter your own model API key. Everything is stored locally only.",
+      "llm.provider": "API Provider",
+      "llm.provider.qwen": "Qwen API (recommended)",
+      "llm.provider.online": "Other online API (GPT / Gemini / Volcengine / iFlytek …)",
+      "llm.provider.local": "Self-hosted API (Ollama / LocalAI …)",
+      "llm.provider.mock": "Mock mode (no quota used)",
+      "llm.model": "Model",
+      "llm.apikey": "API Key",
+      "llm.baseurl": "Base URL (endpoint)",
+      "llm.baseurl.ph": "Leave empty for the built-in default",
+      "llm.target": "Target language",
+      "llm.translate_zh": "Also translate Chinese input (off by default, saves tokens)",
+
+      "lang.zh": "Chinese",
+      "lang.en": "English",
+      "lang.fr": "French",
+      "lang.ja": "Japanese",
+      "lang.ko": "Korean",
+      "lang.es": "Spanish",
+
+      "audio.hint": "System loopback = capture what OBS hears; Microphone = a specific input device.",
+      "audio.mode": "Mode",
+      "audio.mode.obs": "OBS plugin feed (auto-selected in plugin mode, do not change)",
+      "audio.mode.system": "System audio loopback (standalone)",
+      "audio.mode.device": "Specific input/output device",
+      "audio.locked": "🔒 Started by the OBS plugin: audio is fed directly by the plugin, mode locked.",
+      "audio.device": "Device",
+      "audio.device.default": "(Default)",
+      "audio.tag.input": "Input",
+      "audio.tag.output": "Output",
+      "audio.sck": "Use ScreenCaptureKit on macOS (requires Screen Recording permission)",
+
+      "obs.hint": "Auto-connects to local OBS (obs-websocket v5) and mirrors subtitles into a “Subtitles” text source.",
+      "obs.auto": "Connect automatically on start",
+      "obs.host": "OBS WebSocket host",
+      "obs.port": "OBS port",
+      "obs.password": "OBS password (if enabled)",
+      "obs.dockhint.a": "Want the console docked in OBS? Go to OBS → top menu",
+      "obs.dockhint.tools": "Tools",
+      "obs.dockhint.arrow": "→",
+      "obs.dockhint.docks": "Custom Browser Docks",
+      "obs.dockhint.then": "→ enter",
+      "obs.dockhint.name": " — any name works.",
+
+      "style.hint": "Saved changes apply to the OBS overlay <b>immediately</b> — no need to re-copy the URL below.",
+      "style.size": "Font size (px)",
+      "style.maxlines": "Max lines",
+      "style.maxlines.note": "Grows as needed: one line for short text, wrapping to 2/3/4 lines when it doesn’t fit. <b>Text past the limit is not truncated — it is shown in successive segments</b> (long-form news, interviews). Set 1 for a strict single line with an ellipsis.",
+      "style.bgsize": "Background size (px)",
+      "style.width": "Width",
+      "style.height": "Height",
+      "style.radius": "Radius",
+      "style.opacity": "Background opacity",
+      "style.color": "Text",
+      "style.bg": "Background",
+      "style.position": "Position",
+      "style.pos.bottom": "Bottom",
+      "style.pos.top": "Top",
+      "style.pos.middle": "Middle",
+      "style.animation": "Animation",
+      "style.anim.typewriter": "Typewriter",
+      "style.anim.fade": "Fade",
+      "style.anim.slide": "Slide",
+
+      "preview.save": "Save",
+      "preview.restart": "Restart pipeline",
+      "preview.clear": "Clear subtitles",
+
+      "overlay.url.label": "Overlay URL (paste into an OBS browser source)",
+      "overlay.sizehint": "Recommended browser source size: 1920×540",
+
+      "footer": "Made by Buxi Studio",
+
+      "config.path": "Config file: ",
+      "err.prefix": "❗ ",
+      "err.running": "✅ Pipeline running",
+      "err.obs": "⚠️ OBS not connected: ",
+      "err.obs.tail": " (make sure OBS is running and Tools → WebSocket Server Settings is enabled)",
+
+      "toast.saving": "Saving…",
+      "toast.savefail": "Failed to save: ",
+      "toast.saved": "✅ Configuration saved and applied (pipeline restarted)",
+      "toast.mismatch": "⚠️ Saved, but the value read back differs — check config file permissions",
+      "toast.needkey": "Please enter an API key first",
+      "toast.keyurl": "That looks like a URL, not an API key. Keys start with sk-",
+      "toast.qwenurl": "Invalid Base URL: DashScope Realtime needs a WebSocket address (wss://…). Leave it empty to use the built-in default.",
+      "toast.onlineurl": "Base URL must be a WebSocket address (starting with wss://)",
+      "toast.localneedep": "Enter your local API address, e.g. ws://localhost:11434/v1/realtime",
+      "toast.localurl": "Local API address must be a WebSocket address (starting with ws://)",
+    },
+  };
+
+  let currentLang = "zh";
+
+  /// 查文案。英文缺某条时退回中文，避免界面出现空白。
+  function t(key) {
+    const dict = I18N[currentLang] || I18N.zh;
+    if (dict[key] !== undefined) return dict[key];
+    if (I18N.zh[key] !== undefined) return I18N.zh[key];
+    return key;
+  }
+
+  /// 把当前语言的文案套到所有标记了 data-i18n* 的元素上。
+  function applyI18n() {
+    document.querySelectorAll("[data-i18n]").forEach((el) => {
+      el.textContent = t(el.getAttribute("data-i18n"));
+    });
+    document.querySelectorAll("[data-i18n-html]").forEach((el) => {
+      el.innerHTML = t(el.getAttribute("data-i18n-html"));
+    });
+    document.querySelectorAll("[data-i18n-ph]").forEach((el) => {
+      el.placeholder = t(el.getAttribute("data-i18n-ph"));
+    });
+    document.querySelectorAll("[data-i18n-title]").forEach((el) => {
+      el.title = t(el.getAttribute("data-i18n-title"));
+    });
+    document.documentElement.lang = currentLang === "zh" ? "zh-CN" : "en";
+    document.title = t("app.title");
+  }
+
+  /// 由服务端判定系统语言；旧版服务端没有 /api/locale 时退回浏览器语言。
+  async function initI18n() {
+    let lang = null;
+    try {
+      const r = await fetch("/api/locale", { cache: "no-store" });
+      if (r.ok) {
+        const j = await r.json();
+        if (j && j.language) lang = j.language === "zh" ? "zh" : "en";
+      }
+    } catch {
+      // 服务端不可达：走下面的浏览器兜底。
+    }
+    if (!lang) {
+      lang = (navigator.language || "").toLowerCase().startsWith("zh") ? "zh" : "en";
+    }
+    currentLang = lang;
+    applyI18n();
+    // 顶栏性能模式按钮在语言检测之前（initPerfMode 于顶层同步执行）就已
+    // 按默认语言上过一次文案，这里按最终语言重刷，否则英文系统下按钮会
+    // 被 applyI18n 覆盖成"未激活"的那一句。
+    setPerfMode(document.body.classList.contains("perf-mode"));
+  }
+
   // OBS dock detection.
   if (new URLSearchParams(location.search).get("obsDock") === "1") {
     document.body.classList.add("dock");
@@ -99,54 +385,109 @@
     "mock": "mock"
   };
 
-  // Per-provider-type hints
+  // Per-provider-type hints, per language.
   const PROVIDER_HINTS = {
-    "qwen": {
-      hint: "通义 Qwen API 适用于 qwen3.5-livetranslate-flash-realtime 模型，支持实时语音同传翻译。API Key 从阿里云百炼控制台获取（格式 sk-...）。",
-      modelPlaceholder: "qwen3.5-livetranslate-flash-realtime",
-      modelSuggestions: [
-        { value: "qwen3.5-livetranslate-flash-realtime", label: "同传翻译（推荐，多语言→目标语言）" },
-        { value: "qwen3-asr-flash-realtime", label: "通义语音识别（ASR）" },
-        { value: "qwen-audio-realtime-plus", label: "Qwen-Audio 实时识别" },
-        { value: "qwen-audio-3.0-realtime-flash", label: "Qwen-Audio 3.0 实时" },
-        { value: "qwen-audio-3.0-asr-flash-streaming", label: "Qwen-Audio 3.0 流式识别" }
-      ],
-      endpointPlaceholder: "留空使用内置默认地址（wss://dashscope.aliyuncs.com/api-ws/v1/realtime）",
-      endpointDefault: "",
-      className: "qwen-hint"
+    zh: {
+      "qwen": {
+        boxHtml: `<strong>💡 通义 Qwen API</strong><br />推荐使用 <code>qwen3.5-livetranslate-flash-realtime</code> 模型，支持实时语音同传翻译。`,
+        modelPlaceholder: "qwen3.5-livetranslate-flash-realtime",
+        modelSuggestions: [
+          { value: "qwen3.5-livetranslate-flash-realtime", label: "同传翻译（推荐，多语言→目标语言）" },
+          { value: "qwen3-asr-flash-realtime", label: "通义语音识别（ASR）" },
+          { value: "qwen-audio-realtime-plus", label: "Qwen-Audio 实时识别" },
+          { value: "qwen-audio-3.0-realtime-flash", label: "Qwen-Audio 3.0 实时" },
+          { value: "qwen-audio-3.0-asr-flash-streaming", label: "Qwen-Audio 3.0 流式识别" }
+        ],
+        endpointPlaceholder: "留空使用内置默认地址（wss://dashscope.aliyuncs.com/api-ws/v1/realtime）",
+        endpointDefault: "",
+        className: "qwen-hint"
+      },
+      "online": {
+        boxHtml: `<strong>🌐 其它在线 API</strong><br />支持 OpenAI 兼容接口的在线服务，包括 GPT、Gemini、火山引擎、讯飞等。`,
+        modelPlaceholder: "gpt-4o-realtime",
+        modelSuggestions: [
+          { value: "gpt-4o-realtime", label: "OpenAI GPT-4o Realtime" },
+          { value: "gpt-4o-mini-realtime", label: "OpenAI GPT-4o-mini Realtime" },
+          { value: "gemini-2.0-flash-exp", label: "Google Gemini 2.0 Flash" }
+        ],
+        endpointPlaceholder: "例如：wss://api.openai.com/v1/realtime",
+        endpointDefault: "wss://api.openai.com/v1/realtime",
+        className: "online-hint"
+      },
+      "local": {
+        boxHtml: `<strong>💻 本机部署 API</strong><br />连接本地运行的模型服务（如 Ollama）。需要确保服务已启动并开启 Realtime API。`,
+        modelPlaceholder: "模型名称（根据你的本地部署）",
+        modelSuggestions: [
+          { value: "llama3.2-realtime", label: "Llama 3.2 Realtime（Ollama）" },
+          { value: "qwen2.5-realtime", label: "Qwen 2.5 Realtime（Ollama）" }
+        ],
+        endpointPlaceholder: "例如：ws://localhost:11434/v1/realtime",
+        endpointDefault: "ws://localhost:11434/v1/realtime",
+        className: "local-hint"
+      },
+      "mock": {
+        boxHtml: `<strong>🧪 模拟模式</strong><br />本地模拟输出，不联网、不消耗额度，仅用于界面测试。`,
+        modelPlaceholder: "mock",
+        modelSuggestions: [],
+        endpointPlaceholder: "无需填写",
+        endpointDefault: "",
+        className: "qwen-hint"
+      }
     },
-    "online": {
-      hint: "支持 OpenAI 兼容的 Realtime WebSocket 接口，包括 GPT、Gemini、火山引擎、讯飞等在线 API。Base URL 填对应的 WebSocket 地址（wss://...）。",
-      modelPlaceholder: "gpt-4o-realtime",
-      modelSuggestions: [
-        { value: "gpt-4o-realtime", label: "OpenAI GPT-4o Realtime" },
-        { value: "gpt-4o-mini-realtime", label: "OpenAI GPT-4o-mini Realtime" },
-        { value: "gemini-2.0-flash-exp", label: "Google Gemini 2.0 Flash" }
-      ],
-      endpointPlaceholder: "例如：wss://api.openai.com/v1/realtime",
-      endpointDefault: "wss://api.openai.com/v1/realtime",
-      className: "online-hint"
-    },
-    "local": {
-      hint: "支持本机部署的兼容 API（如 Ollama、LocalAI 等）。Base URL 填本机地址，例如：ws://localhost:11434/v1/realtime",
-      modelPlaceholder: "模型名称（根据你的本地部署）",
-      modelSuggestions: [
-        { value: "llama3.2-realtime", label: "Llama 3.2 Realtime（Ollama）" },
-        { value: "qwen2.5-realtime", label: "Qwen 2.5 Realtime（Ollama）" }
-      ],
-      endpointPlaceholder: "例如：ws://localhost:11434/v1/realtime",
-      endpointDefault: "ws://localhost:11434/v1/realtime",
-      className: "local-hint"
-    },
-    "mock": {
-      hint: "本地模拟输出，不联网、不消耗额度，仅用于界面测试。",
-      modelPlaceholder: "mock",
-      modelSuggestions: [],
-      endpointPlaceholder: "无需填写",
-      endpointDefault: "",
-      className: "qwen-hint"
+
+    en: {
+      "qwen": {
+        boxHtml: `<strong>💡 Qwen API</strong><br />Recommended model: <code>qwen3.5-livetranslate-flash-realtime</code> — real-time simultaneous speech translation.`,
+        modelPlaceholder: "qwen3.5-livetranslate-flash-realtime",
+        modelSuggestions: [
+          { value: "qwen3.5-livetranslate-flash-realtime", label: "Simultaneous translation (recommended, multi-language → target)" },
+          { value: "qwen3-asr-flash-realtime", label: "Qwen speech recognition (ASR)" },
+          { value: "qwen-audio-realtime-plus", label: "Qwen-Audio realtime" },
+          { value: "qwen-audio-3.0-realtime-flash", label: "Qwen-Audio 3.0 realtime" },
+          { value: "qwen-audio-3.0-asr-flash-streaming", label: "Qwen-Audio 3.0 streaming ASR" }
+        ],
+        endpointPlaceholder: "Leave empty for the built-in default (wss://dashscope.aliyuncs.com/api-ws/v1/realtime)",
+        endpointDefault: "",
+        className: "qwen-hint"
+      },
+      "online": {
+        boxHtml: `<strong>🌐 Other Online APIs</strong><br />Any OpenAI-compatible online service, including GPT, Gemini, Volcengine and iFlytek.`,
+        modelPlaceholder: "gpt-4o-realtime",
+        modelSuggestions: [
+          { value: "gpt-4o-realtime", label: "OpenAI GPT-4o Realtime" },
+          { value: "gpt-4o-mini-realtime", label: "OpenAI GPT-4o-mini Realtime" },
+          { value: "gemini-2.0-flash-exp", label: "Google Gemini 2.0 Flash" }
+        ],
+        endpointPlaceholder: "e.g. wss://api.openai.com/v1/realtime",
+        endpointDefault: "wss://api.openai.com/v1/realtime",
+        className: "online-hint"
+      },
+      "local": {
+        boxHtml: `<strong>💻 Self-hosted API</strong><br />Connect to a model service running locally (e.g. Ollama). Make sure it is started and exposes the Realtime API.`,
+        modelPlaceholder: "Model name (as deployed locally)",
+        modelSuggestions: [
+          { value: "llama3.2-realtime", label: "Llama 3.2 Realtime (Ollama)" },
+          { value: "qwen2.5-realtime", label: "Qwen 2.5 Realtime (Ollama)" }
+        ],
+        endpointPlaceholder: "e.g. ws://localhost:11434/v1/realtime",
+        endpointDefault: "ws://localhost:11434/v1/realtime",
+        className: "local-hint"
+      },
+      "mock": {
+        boxHtml: `<strong>🧪 Mock Mode</strong><br />Local simulated output — no network, no quota, for UI testing only.`,
+        modelPlaceholder: "mock",
+        modelSuggestions: [],
+        endpointPlaceholder: "Not required",
+        endpointDefault: "",
+        className: "qwen-hint"
+      }
     }
   };
+
+  /// 当前语言下的 provider 提示；英文缺项时退回中文。
+  function providerHint(providerType) {
+    return (PROVIDER_HINTS[currentLang] || PROVIDER_HINTS.zh)[providerType];
+  }
 
   function fillForm(cfg) {
     // Determine provider type from internal provider name
@@ -223,11 +564,9 @@
     document.body.classList.toggle("perf-mode", on);
     const btn = $("perf-mode-btn");
     if (btn) {
-      btn.textContent = on ? "切换到液态玻璃" : "切换到性能模式";
+      btn.textContent = on ? t("perf.btn.active") : t("perf.btn");
       btn.setAttribute("aria-pressed", on ? "true" : "false");
-      btn.title = on
-        ? "当前为性能模式（已关闭液态玻璃特效）。点击恢复液态玻璃效果。"
-        : "关闭液态玻璃特效（极光动画、毛玻璃模糊、高光扫动），降低集显占用";
+      btn.title = on ? t("perf.title.active") : t("perf.title");
     }
     writePerfMode(on);
   }
@@ -284,14 +623,14 @@
     el.style.color = $("ov-color").value;
     el.style.background =
       hexToRgba($("ov-bg").value, opacity / 100) || `rgba(0,0,0,${opacity / 100})`;
-    // 0 = 自动：宽度贴合文字，高度刚好一行。
+    // 0 = 自动：宽度贴合文字，高度按行数自适应。
     el.style.width = w > 0 ? Math.round(w * k) + "px" : "auto";
     el.style.height = h > 0 ? Math.round(h * k) + "px" : "auto";
     el.style.borderRadius = Math.round(radius * k) + "px";
 
-    // 与 overlay 一致：视口高度 = 最大行数 × 行高，超出部分滚动显示。
-    // 这里不再用 -webkit-line-clamp —— 否则预览显示省略号，而 OBS 里在滚动，
-    // 两边观感对不上。
+    // 与 overlay 一致：视口高度 = 最大行数 × 行高，超出部分分段显示。
+    // 这里不再用 -webkit-line-clamp —— 否则预览显示省略号，而 OBS 里在
+    // 分段播放，两边观感对不上。
     const lineEl = $("preview-line");
     if (lineEl) {
       const lines = Math.min(4, Math.max(1, num("ov-max-lines", 2)));
@@ -301,14 +640,14 @@
       const lh = parseFloat(getComputedStyle(el).lineHeight) || Math.round(size * k) * 1.25;
       lineEl.style.setProperty("--preview-max-height", (lines * lh).toFixed(2) + "px");
       ensurePreviewInner();
-      previewScroller.restart();
+      previewPager.restart();
     }
 
     stage.className = "preview-stage position-" + ($("ov-position").value || "bottom");
   }
 
   /// 与 overlay 同样的结构：外层 #preview-line 当视口裁切，
-  /// 文字放进内层 .preview-inner，靠 transform 上移实现滚动。
+  /// 文字放进内层 .preview-inner，靠 transform 位移分段显示。
   /// 动态创建，避免依赖 index.html 改版。
   function ensurePreviewInner() {
     const lineEl = $("preview-line");
@@ -323,43 +662,38 @@
     return inner;
   }
 
-  /// 「超出最大行数就滚动把字吐出来」的控制器，逻辑与 overlay 一致。
+  /// 「超出最大行数就分段依次显示」的控制器，逻辑与 overlay 完全一致。
   /// 预览区用它还原 OBS 里的真实观感。
-  function createScroller(getLineEl, getInnerEl) {
-    const ARM = 400;          // 等文字稳定的时间
-    const HOLD_TOP = 1000;    // 停在开头的时间
-    const HOLD_BOTTOM = 1200; // 滚到底后的停留时间
-    const SPEED = 40;         // 滚动速度 px/s
-    const MIN_MS = 400;
-    const MAX_MS = 5000;
-    const EPS = 2;            // 小于 2px 视为没溢出（亚像素误差）
+  function createPager(getLineEl, getInnerEl) {
+    const ARM = 400;       // 等文字稳定的时间
+    const MIN_MS = 1600;   // 每段最短停留
+    const PER_CHAR = 55;   // 每段按字数追加的停留时间
+    const MAX_MS = 4500;
 
     let timer = null;
     let armTimer = null;
     let gen = 0;
+
+    function pageCount(lineEl, inner) {
+      const view = lineEl.clientHeight;
+      if (!inner || view <= 0) return 1;
+      return Math.max(1, Math.ceil(inner.scrollHeight / view));
+    }
+
+    function showPage(lineEl, inner, i) {
+      const view = lineEl.clientHeight;
+      if (!inner || view <= 0) return;
+      // 最后一段贴底，否则末尾会拖出半屏空白。
+      const offset = Math.min(i * view, Math.max(0, inner.scrollHeight - view));
+      inner.style.transform = offset > 0 ? "translateY(" + -offset + "px)" : "";
+    }
 
     function reset() {
       gen++;
       if (timer) { clearTimeout(timer); timer = null; }
       if (armTimer) { clearTimeout(armTimer); armTimer = null; }
       const inner = getInnerEl();
-      if (inner) {
-        inner.style.transition = "none";
-        inner.style.transform = "translateY(0)";
-      }
-      const lineEl = getLineEl();
-      if (lineEl) lineEl.classList.remove("scrolling");
-    }
-
-    function after(ms, fn) {
-      const myGen = gen;
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        // 期间换了字幕或样式：这一串回调作废。
-        if (myGen !== gen) return;
-        timer = null;
-        fn();
-      }, ms);
+      if (inner) inner.style.transform = "";
     }
 
     function run() {
@@ -367,29 +701,34 @@
       const inner = getInnerEl();
       if (!lineEl || !inner) return;
       if (lineEl.classList.contains("single-line")) return;
-      const distance = Math.max(0, Math.round(inner.scrollHeight - lineEl.clientHeight));
-      if (distance <= EPS) return; // 没溢出就保持原位
-      lineEl.classList.add("scrolling");
+      const total = pageCount(lineEl, inner);
+      if (total <= 1) { showPage(lineEl, inner, 0); return; }
 
-      const dur = Math.min(
-        MAX_MS,
-        Math.max(MIN_MS, Math.round((distance / SPEED) * 1000))
-      );
-      // 开头停留 → 匀速滚到底 → 底部停留 → 回到开头 → 循环
-      after(HOLD_TOP, () => {
-        inner.style.transition = `transform ${dur}ms linear`;
-        inner.style.transform = `translateY(${-distance}px)`;
-        after(dur + HOLD_BOTTOM, () => {
-          const back = Math.max(240, Math.round(dur * 0.5));
-          inner.style.transition = `transform ${back}ms ease-out`;
-          inner.style.transform = "translateY(0)";
-          after(back + HOLD_TOP, run);
-        });
-      });
+      const myGen = gen;
+      let index = 0;
+      showPage(lineEl, inner, 0);
+
+      const step = () => {
+        if (myGen !== gen) return;
+        if (index >= total - 1) return; // 播完就停，不循环
+        const dur = Math.min(MAX_MS, Math.max(MIN_MS, PER_CHAR * 20));
+        timer = setTimeout(() => {
+          if (myGen !== gen) return;
+          timer = null;
+          index++;
+          showPage(lineEl, inner, index);
+          step();
+        }, dur);
+      };
+      step();
     }
 
     function restart() {
       reset();
+      // 先跟随最新一段，稳定后再从头依次播放。
+      const lineEl = getLineEl();
+      const inner = getInnerEl();
+      if (lineEl && inner) showPage(lineEl, inner, pageCount(lineEl, inner) - 1);
       if (armTimer) clearTimeout(armTimer);
       armTimer = setTimeout(() => {
         armTimer = null;
@@ -400,7 +739,7 @@
     return { reset: reset, restart: restart };
   }
 
-  const previewScroller = createScroller(
+  const previewPager = createPager(
     () => $("preview-line"),
     () => ensurePreviewInner()
   );
@@ -408,7 +747,7 @@
   // Update UI based on selected provider type
   function updateProviderUI() {
     const providerType = $("provider-type").value;
-    const hintData = PROVIDER_HINTS[providerType];
+    const hintData = providerHint(providerType);
     const hintBox = $("provider-hint-box");
     const modelInput = $("model");
     const endpointInput = $("endpoint");
@@ -416,15 +755,7 @@
 
     // Update hint box
     hintBox.className = "provider-hint-box " + hintData.className;
-    if (providerType === "qwen") {
-      hintBox.innerHTML = `<strong>💡 通义 Qwen API</strong><br />推荐使用 <code>qwen3.5-livetranslate-flash-realtime</code> 模型，支持实时语音同传翻译。`;
-    } else if (providerType === "online") {
-      hintBox.innerHTML = `<strong>🌐 其它在线 API</strong><br />支持 OpenAI 兼容接口的在线服务，包括 GPT、Gemini、火山引擎、讯飞等。`;
-    } else if (providerType === "local") {
-      hintBox.innerHTML = `<strong>💻 本机部署 API</strong><br />连接本地运行的模型服务（如 Ollama）。需要确保服务已启动并开启 Realtime API。`;
-    } else if (providerType === "mock") {
-      hintBox.innerHTML = `<strong>🧪 模拟模式</strong><br />本地模拟输出，不联网、不消耗额度，仅用于界面测试。`;
-    }
+    hintBox.innerHTML = hintData.boxHtml;
 
     // Update model placeholder
     modelInput.placeholder = hintData.modelPlaceholder;
@@ -516,12 +847,17 @@
       const sel = $("audio-device");
       sel.innerHTML = "";
       const empty = document.createElement("option");
-      empty.value = ""; empty.textContent = "（默认）";
+      empty.value = "";
+      empty.textContent = t("audio.device.default");
       sel.appendChild(empty);
       for (const d of list) {
         const opt = document.createElement("option");
         opt.value = d.name;
-        const tag = [d.supports_input && "输入", d.supports_output && "输出"]
+        // 设备名由驱动提供，不翻译；只翻译「输入 / 输出」标记。
+        const tag = [
+          d.supports_input && t("audio.tag.input"),
+          d.supports_output && t("audio.tag.output"),
+        ]
           .filter(Boolean).join(" / ");
         opt.textContent = `${d.name} ${tag ? `[${tag}]` : ""}`;
         sel.appendChild(opt);
@@ -548,30 +884,31 @@
       set("dot-obs", s.obs_connected, false);
       const run = $("run-state");
       if (s.running) {
-        run.textContent = "● 管线运行中";
+        run.textContent = t("status.running");
         run.className = "run-state ok";
       } else {
-        run.textContent = "● 管线未运行";
+        run.textContent = t("status.stopped");
         run.className = "run-state bad";
       }
       const errEl = $("engine-error");
       errEl.classList.remove("good");
       if (s.last_error) {
-        errEl.textContent = "❗ " + s.last_error;
+        // 引擎报错原文不翻译（通常已是英文），只翻译前缀。
+        errEl.textContent = t("err.prefix") + s.last_error;
         errEl.hidden = false;
       } else if (!s.obs_connected && s.obs_error) {
-        errEl.textContent = "⚠️ OBS 未连接：" + s.obs_error +
-          "（请确认 OBS 已启动，且 工具 → WebSocket 服务器设置 已开启）";
+        errEl.textContent =
+          t("err.obs") + s.obs_error + t("err.obs.tail");
         errEl.hidden = false;
       } else if (s.running) {
-        errEl.textContent = "✅ 管线运行中";
+        errEl.textContent = t("err.running");
         errEl.hidden = false;
         errEl.classList.add("good");
       } else {
         errEl.hidden = true;
       }
       if (s.config_path) {
-        $("config-path").textContent = "配置文件：" + s.config_path;
+        $("config-path").textContent = t("config.path") + s.config_path;
       }
       const modeSel = $("audio-mode");
       const lock = $("audio-mode-lock");
@@ -621,7 +958,7 @@
   }
 
   function clearPreview() {
-    previewScroller.reset();
+    previewPager.reset();
     const inner = ensurePreviewInner();
     if (inner) inner.textContent = "";
     $("preview-caption").classList.add("empty");
@@ -646,11 +983,11 @@
 
     if (patch.llm.provider !== "mock") {
       if (!key) {
-        toast("请先填写 API Key", "error");
+        toast(t("toast.needkey"), "error");
         return;
       }
       if (/^https?:/i.test(key) || key.includes("://")) {
-        toast("API Key 填成了网址！Key 是以 sk- 开头的密钥", "error");
+        toast(t("toast.keyurl"), "error");
         return;
       }
     }
@@ -659,7 +996,7 @@
 
     if (providerType === "qwen") {
       if (patch.llm.endpoint && /compatible-mode|http:|https:/i.test(patch.llm.endpoint)) {
-        toast("Base URL 不正确：DashScope Realtime 需要 WebSocket 地址（wss://...），建议留空使用内置默认", "error");
+        toast(t("toast.qwenurl"), "error");
         return;
       }
     }
@@ -667,7 +1004,7 @@
     if (providerType === "online") {
       const ep = patch.llm.endpoint?.trim() || "";
       if (ep && !/^wss?:/i.test(ep)) {
-        toast("Base URL 必须是 WebSocket 地址（wss:// 开头）", "error");
+        toast(t("toast.onlineurl"), "error");
         return;
       }
     }
@@ -675,18 +1012,18 @@
     if (providerType === "local") {
       const ep = patch.llm.endpoint?.trim() || "";
       if (!ep) {
-        toast("请填写本机部署 API 的地址，例如 ws://localhost:11434/v1/realtime", "error");
+        toast(t("toast.localneedep"), "error");
         return;
       }
       if (!/^ws?:/i.test(ep)) {
-        toast("本机 API 地址必须是 WebSocket 地址（ws:// 开头）", "error");
+        toast(t("toast.localurl"), "error");
         return;
       }
     }
 
     const btn = $("save-btn");
     btn.disabled = true;
-    btn.textContent = "保存中…";
+    btn.textContent = t("toast.saving");
     try {
       const r = await fetch("/api/config", {
         method: "POST",
@@ -696,7 +1033,7 @@
       if (!r.ok) {
         let msg = "HTTP " + r.status;
         try { msg = (await r.json()).error || msg; } catch {}
-        toast("保存失败：" + msg, "error");
+        toast(t("toast.savefail") + msg, "error");
         return;
       }
       await loadConfig();
@@ -704,17 +1041,17 @@
       const saved = currentConfig && currentConfig.llm.api_key === patch.llm.api_key
         && currentConfig.llm.model === patch.llm.model;
       if (saved) {
-        toast("✅ 配置已保存并生效（管线已重启）", "ok");
+        toast(t("toast.saved"), "ok");
       } else {
-        toast("⚠️ 已保存，但读回内容不一致，请检查配置文件权限", "error");
+        toast(t("toast.mismatch"), "error");
       }
       await fetch("/api/restart", { method: "POST" });
       setTimeout(loadStatus, 800);
     } catch (e) {
-      toast("保存失败：" + e, "error");
+      toast(t("toast.savefail") + e, "error");
     } finally {
       btn.disabled = false;
-      btn.textContent = "保存配置";
+      btn.textContent = t("preview.save");
     }
   });
 
@@ -767,7 +1104,10 @@
     });
   }
 
-  loadConfig().then(loadDevices);
+  // 先定语言再渲染：否则界面会先闪一版中文再跳成英文。
+  initI18n().then(() => {
+    loadConfig().then(loadDevices);
+  });
   setInterval(loadStatus, 1500);
   setInterval(loadHistory, 5000);
   connectWS();

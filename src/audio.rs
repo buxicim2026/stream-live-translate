@@ -7,7 +7,10 @@
 //!              OR ScreenCaptureKit). We try the standard cpal loopback flow
 //!              first and fall back to ScreenCaptureKit when
 //!              `audio.use_screen_capture_kit` is true.
-//!   * Linux:   PulseAudio/PipeWire monitor source on the default sink.
+//!   * Linux:   ALSA (cpal's backend). System audio is exposed by
+//!              PulseAudio/PipeWire as a `*.monitor` source through the
+//!              alsa-plugins bridge; we prefer it and fall back to the
+//!              default input (usually a microphone) with a warning.
 
 use std::sync::Arc;
 
@@ -156,8 +159,51 @@ fn pick_device(host: &cpal::Host, cfg: &AudioConfig) -> Result<cpal::Device> {
             return Ok(d);
         }
     }
+    // Linux 没有 WASAPI 那种环回接口：系统声音是作为 PulseAudio /
+    // PipeWire 的「monitor 源」暴露的，名字里通常带 `.monitor`。cpal 走
+    // ALSA（经 alsa-plugins 的 pulse 插件能看到这些源），但默认输入设备
+    // 是麦克风 —— 不特殊处理的话 Linux 上会静默录错设备，用户只知道
+    // 「没字幕」，很难排查。
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(d) = pick_linux_monitor(host) {
+            let name = d.name().unwrap_or_else(|_| "<unnamed>".into());
+            info!(device = %name, "using system audio monitor source");
+            return Ok(d);
+        }
+        warn!(
+            "no PulseAudio/PipeWire monitor source found; \
+             falling back to the default input device (likely a microphone). \
+             To capture system audio on Linux, select a *.monitor device above."
+        );
+    }
     host.default_input_device()
         .ok_or_else(|| anyhow!("no input or output device available"))
+}
+
+/// Pick the PulseAudio/PipeWire monitor source that carries system audio.
+/// Prefers an exact `*.monitor` name, then any device mentioning monitor /
+/// loopback. Returns None when the ALSA plugin bridge isn't available.
+#[cfg(target_os = "linux")]
+fn pick_linux_monitor(host: &cpal::Host) -> Option<cpal::Device> {
+    let mut fallback = None;
+    for dev in host.devices().ok()?.into_iter() {
+        let Ok(name) = dev.name() else { continue };
+        // Only devices we can actually open as an input are usable.
+        if dev.default_input_config().is_err() {
+            continue;
+        }
+        let lower = name.to_lowercase();
+        if lower.ends_with(".monitor") {
+            return Some(dev);
+        }
+        if fallback.is_none()
+            && (lower.contains("monitor") || lower.contains("loopback"))
+        {
+            fallback = Some(dev);
+        }
+    }
+    fallback
 }
 
 fn build_stream<T>(
@@ -257,14 +303,6 @@ pub mod macos {
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 compile_error!("only Windows, macOS, and Linux are supported");
 
-#[cfg(target_os = "linux")]
-pub mod linux {
-    use super::*;
-
-    pub fn ensure_pulse_running() -> Result<()> {
-        // We don't need to do anything explicit; cpal's PulseAudio backend
-        // will lazily connect. Provided here so future code can validate
-        // the daemon via `pactl info` before capture.
-        Ok(())
-    }
-}
+// (No `linux` helper module: cpal 0.15 on Linux talks to ALSA directly, and
+// there is nothing to start up front. The monitor-source preference lives in
+// `pick_linux_monitor` above.)

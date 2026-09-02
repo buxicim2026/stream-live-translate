@@ -496,8 +496,8 @@ body.perf-mode .perf-btn {
 }
 #preview-line {
   /* 与 overlay 一致：视口高度 = 最大行数 × 行高（--preview-max-height 由
-     JS 按字号算出）。短句贴合文字，长句撑到上限，超出的部分滚动显示，
-     不再用省略号吞掉。 */
+     JS 按字号算出）。短句贴合文字，长句撑到上限，超出的部分分段依次
+     显示，不再用省略号吞掉。 */
   display: block;
   overflow: hidden;
   min-width: 0;
@@ -506,13 +506,13 @@ body.perf-mode .perf-btn {
   word-break: break-word;
   overflow-wrap: break-word;
 }
-/* 承载文字的内层：transform 不影响布局，滚动时预览框高度不跳动 */
+/* 承载文字的内层：transform 不影响布局，换段时预览框高度不跳动。
+   刻意不加 transition —— 分段是整段替换，加了过渡又会变成滚动效果。 */
 .preview-inner {
   display: block;
   width: 100%;
-  transition: transform 200ms linear;
 }
-/* 最大行数 = 1：严格单行，超出用省略号（无滚动） */
+/* 最大行数 = 1：严格单行，超出用省略号（无分段） */
 #preview-line.single-line { max-height: none; }
 #preview-line.single-line .preview-inner {
   transition: none;

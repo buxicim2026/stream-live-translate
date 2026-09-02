@@ -1,6 +1,6 @@
 [package]
 name = "stream-live-translate"
-version = "0.0.23"
+version = "0.0.24"
 edition = "2021"
 rust-version = "1.74"
 authors = ["Stream Live Translate Contributors"]
@@ -89,6 +89,7 @@ include_dir = "0.7"
 
 # Language detection for subtitle routing.
 unicode-script = "0.5"
+sys-locale = "0.3"
 
 [features]
 default = []

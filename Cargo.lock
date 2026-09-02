@@ -1614,7 +1614,7 @@ dependencies = [
 
 [[package]]
 name = "stream-live-translate"
-version = "0.0.23"
+version = "0.0.24"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1637,6 +1637,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "sys-locale",
  "thiserror",
  "tokio",
  "tokio-tungstenite 0.23.1",
@@ -1682,6 +1683,15 @@ name = "sync_wrapper"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bf256ce5efdfa370213c1dabab5935a12e49f2c58d15e9eac2870d3b4f27263"
+
+[[package]]
+name = "sys-locale"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8eab9a99a024a169fe8a903cf9d4a3b3601109bcc13bd9e3c6fff259138626c4"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "tempfile"

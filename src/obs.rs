@@ -28,6 +28,24 @@ use crate::AppState;
 /// "Interact" button to manage the plugin without leaving OBS.
 pub const DOCK_INPUT_NAME: &str = "StreamLiveTranslateAdmin";
 
+/// OBS 的文本源在不同平台根本不是同一个 input kind：
+///   * Windows -> GDI+ (`text_gdiplus_v2`)
+///   * Linux / macOS -> FreeType (`text_ft2_source`)
+/// 写死 Windows 的 kind，Linux 上的 CreateInput 会被 OBS 直接拒绝。
+#[cfg(target_os = "windows")]
+const OBS_TEXT_KIND: &str = "text_gdiplus_v2";
+#[cfg(not(target_os = "windows"))]
+const OBS_TEXT_KIND: &str = "text_ft2_source";
+
+/// 兜底字体。Linux 上没有 Microsoft YaHei，写死它会让文本源回退到
+/// 默认字体甚至渲染成方块，所以各平台挑一个几乎必定存在的中文字体。
+#[cfg(target_os = "windows")]
+const OBS_TEXT_FONT: &str = "Microsoft YaHei";
+#[cfg(target_os = "macos")]
+const OBS_TEXT_FONT: &str = "PingFang SC";
+#[cfg(target_os = "linux")]
+const OBS_TEXT_FONT: &str = "Noto Sans CJK SC";
+
 #[derive(Debug, Clone)]
 pub struct ObsStatus {
     pub connected: bool,
@@ -312,10 +330,10 @@ where
             "requestData": {
                 "sceneName": "Current Scene",
                 "inputName": fallback,
-                "inputKind": "text_gdiplus_v2",
+                "inputKind": OBS_TEXT_KIND,
                 "inputSettings": {
                     "text": text,
-                    "font": { "face": "Microsoft YaHei", "size": 48 },
+                    "font": { "face": OBS_TEXT_FONT, "size": 48 },
                     "color": 0xFFFFFFFFu32,
                     "outline": true,
                     "outline_color": 0xFF000000u32,

@@ -48,7 +48,7 @@ bg_opacity = 75              # 背景不透明度 0-100（0=全透明，100=全�
 bg_width = 0                 # 背景宽度 px，0 = 自动贴合文字
 bg_height = 0                # 背景高度 px，0 = 自动（按行数自适应）
 border_radius = 8            # 背景圆角 px
-max_lines = 2                # 字幕显示行数（1-4）：按需折到 2/3/4 行；超出则自动滚动显示，不再省略。1 = 严格单行 + 省略号
+max_lines = 2                # 字幕显示行数（1-4）：按需折到 2/3/4 行；超出则自动分段依次显示，不再省略。1 = 严格单行 + 省略号
 position = "bottom"          # bottom | top | middle
 layout = "single"            # single | double
 animation = "typewriter"     # typewriter | fade | slide
