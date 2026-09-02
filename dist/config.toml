@@ -15,6 +15,7 @@ endpoint = ""         # 留空 = 用内置地址
 target_lang = "zh"
 translate_chinese = false   # true 的话中文也会被"翻译"（一般不必要）
 system_prompt = ""
+segment_ms = 0    # 低延迟分段(毫秒)：0=整句模式；800~1600=字幕边说边出，中文直播建议配 qwen3-asr-flash-realtime
 
 [audio]
 mode = "system"             # "system" = 系统音频环回；"device" = 选指定设备；

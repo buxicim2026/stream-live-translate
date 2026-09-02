@@ -167,6 +167,9 @@ pub mod qwen {
             let read = {
                 let sink = sink_for_read.clone();
                 async move {
+                    // pending：当前这一轮/这一句服务端给到的「累计稳定文本」。
+                    // 用来把累积类事件 diff 成「只推新增」，避免重复 append。
+                    let mut pending = String::new();
                     while let Some(msg) = read_half.next().await {
                         let msg = match msg {
                             Ok(m) => m,
@@ -178,7 +181,7 @@ pub mod qwen {
                         match msg {
                             Message::Text(t) => {
                                 if let Ok(ev) = serde_json::from_str::<QwenEvent>(&t) {
-                                    handle_event(&ev, &sink);
+                                    apply_qwen_event(&ev, &sink, &mut pending);
                                 } else {
                                     debug!(payload=%t, "unparsed qwen event");
                                 }
@@ -196,9 +199,23 @@ pub mod qwen {
                 }
             };
 
-            // Audio pump. In server-VAD mode we only append; the server
-            // commits the buffer on detected end-of-speech by itself.
+            // Audio pump with optional low-latency segmentation.
+            //
+            //   * segment_ms == 0（默认）：只 append。服务端 server_vad 在
+            //     「一句话说完、静音达标」后自行 commit，整句返回 —— 句子最
+            //     完整，但字幕要等整句话说完（延迟≈整句话时长）。
+            //   * segment_ms > 0（低延迟模式）：本机累计「正在说的语音」，
+            //     每满该毫秒就主动发一次 input_audio_buffer.commit，把当前
+            //     已说的这一小段提前识别/翻译出来，字幕按段推进，延迟可压到
+            //     ~1–2 秒（代价：长句被切成短段）。静音超 ~400ms 也 commit
+            //     一次收尾，避免句子结尾空等。
+            let segment_ms = self.cfg.segment_ms;
             let write = async move {
+                let commit_enabled = segment_ms > 0;
+                let mut voiced_ms: u64 = 0; // 自上次 commit 起累计的有声时长(ms)
+                let mut tail_ms: u64 = 0; // 有声结束后跟随的静音时长(ms)
+                let mut has_voiced = false; // 上次 commit 后是否出现过语音
+
                 while let Some(chunk) = audio_rx.recv().await {
                     if chunk.is_empty() {
                         continue;
@@ -215,6 +232,52 @@ pub mod qwen {
                     if write_half.send(Message::Text(msg.to_string().into())).await.is_err() {
                         break;
                     }
+                    if !commit_enabled {
+                        continue;
+                    }
+
+                    let ms = (chunk.len() as u64) * 1000 / 16_000;
+                    if crate::vad::rms(&chunk) >= 0.008 {
+                        // 语音：累计到 segment_ms 就提前 commit 一小段。
+                        voiced_ms = voiced_ms.saturating_add(ms);
+                        has_voiced = true;
+                        tail_ms = 0;
+                        if voiced_ms >= segment_ms {
+                            let cm = serde_json::json!({ "type": "input_audio_buffer.commit" });
+                            if write_half
+                                .send(Message::Text(cm.to_string().into()))
+                                .await
+                                .is_err()
+                            {
+                                break;
+                            }
+                            voiced_ms = 0;
+                            tail_ms = 0;
+                        }
+                    } else if has_voiced {
+                        // 语音结束后的尾静音：够长就收尾提交，别让结尾空等。
+                        tail_ms = tail_ms.saturating_add(ms);
+                        if tail_ms >= 400 {
+                            let cm = serde_json::json!({ "type": "input_audio_buffer.commit" });
+                            if write_half
+                                .send(Message::Text(cm.to_string().into()))
+                                .await
+                                .is_err()
+                            {
+                                break;
+                            }
+                            voiced_ms = 0;
+                            tail_ms = 0;
+                            has_voiced = false;
+                        }
+                    }
+                }
+                // 会话结束前把没提交完的尾巴交出去。
+                if commit_enabled && (has_voiced || voiced_ms > 0) {
+                    let cm = serde_json::json!({ "type": "input_audio_buffer.commit" });
+                    let _ = write_half
+                        .send(Message::Text(cm.to_string().into()))
+                        .await;
                 }
                 // Flush the tail of the session, then close gracefully.
                 let _ = write_half
@@ -244,35 +307,67 @@ pub mod qwen {
         SessionUpdated {
             session: serde_json::Value,
         },
-        /// Streaming translation increment (modalities=["text"]). `text` is
-        /// the confirmed text *for this event*; `stash` is speculative tail.
+        /// 逐 token 增量（OpenAI 风格）。
+        #[serde(rename = "response.text.delta")]
+        ResponseTextDelta {
+            #[serde(default)]
+            delta: Option<String>,
+        },
+        /// Streaming translation increment. `text` is the confirmed text
+        /// *for this event*; `stash` is a speculative tail. Both are
+        /// cumulative ("stable prefix" of the current response), so we only
+        /// push the part that is new relative to what we already showed.
         #[serde(rename = "response.text.text")]
         ResponseTextText {
             #[serde(default)]
-            text: String,
+            text: Option<String>,
             #[serde(default)]
             stash: Option<String>,
-            #[serde(default)]
-            item_id: Option<String>,
         },
         /// Final complete translation of one utterance.
         #[serde(rename = "response.text.done")]
         ResponseTextDone {
             #[serde(default)]
-            text: String,
+            text: Option<String>,
         },
-        /// Streaming ASR increment (ASR models with transcription enabled).
+        /// DashScope realtime (audio_transcript channel): cumulative
+        /// translation text. `text` is confirmed, `stash` is the tail.
+        #[serde(rename = "response.audio_transcript.text")]
+        AudioTranscriptText {
+            #[serde(default)]
+            text: Option<String>,
+            #[serde(default)]
+            stash: Option<String>,
+        },
+        #[serde(rename = "response.audio_transcript.delta")]
+        AudioTranscriptDelta {
+            #[serde(default)]
+            delta: Option<String>,
+        },
+        #[serde(rename = "response.audio_transcript.done")]
+        AudioTranscriptDone {
+            #[serde(default)]
+            text: Option<String>,
+        },
+        /// Streaming ASR increment.
         #[serde(rename = "conversation.item.input_audio_transcription.delta")]
         TranscriptionDelta {
             #[serde(default)]
-            text: String,
+            text: Option<String>,
         },
-        /// Source-language ASR stream (only when transcription is enabled).
+        /// ASR cumulative "stable so far" text (stash).
+        #[serde(rename = "conversation.item.input_audio_transcription.text")]
+        TranscriptionText {
+            #[serde(default)]
+            text: Option<String>,
+            #[serde(default)]
+            stash: Option<String>,
+        },
+        /// Source-language ASR stream final (only when transcription enabled).
         #[serde(rename = "conversation.item.input_audio_transcription.completed")]
         Completed {
-            transcript: String,
             #[serde(default)]
-            item_id: Option<String>,
+            transcript: Option<String>,
         },
         #[serde(rename = "error")]
         Error { error: serde_json::Value },
@@ -280,45 +375,93 @@ pub mod qwen {
         Other,
     }
 
-  fn handle_event(ev: &QwenEvent, sink: &SubtitleSink) {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    static LAST_TEXT_LEN: AtomicUsize = AtomicUsize::new(0);
+  /// 把一个服务端事件应用成字幕更新。
+  /// `pending` 记录当前这一句服务端给出的「累计稳定文本」，累积类事件
+  /// （text / stash / transcript）据此只推送新增部分，避免重复。
+  fn apply_qwen_event(ev: &QwenEvent, sink: &SubtitleSink, pending: &mut String) {
     match ev {
-        QwenEvent::ResponseTextText { text, .. } => {
-            if !text.is_empty() {
-                let prev_chars = LAST_TEXT_LEN.load(Ordering::Relaxed);
-                let total_chars = text.chars().count();
-                if total_chars > prev_chars {
-                    let delta: String = text.chars().skip(prev_chars).collect();
-                    if !delta.is_empty() {
-                        sink.push(SubtitleEvent::Partial(delta));
-                    }
+        // ---- 纯增量事件：直接把新增片段交给字幕 ----
+        QwenEvent::ResponseTextDelta { delta } | QwenEvent::AudioTranscriptDelta { delta } => {
+            if let Some(d) = delta {
+                if !d.is_empty() {
+                    sink.push(SubtitleEvent::Partial(d.clone()));
+                    pending.push_str(d);
                 }
-                LAST_TEXT_LEN.store(total_chars, Ordering::Relaxed);
-            }
-        }
-        QwenEvent::ResponseTextDone { text } => {
-            LAST_TEXT_LEN.store(0, Ordering::Relaxed);
-            if !text.is_empty() {
-                sink.push(SubtitleEvent::Final(text.trim().to_string()));
             }
         }
         QwenEvent::TranscriptionDelta { text } => {
-            if !text.is_empty() {
-                sink.push(SubtitleEvent::Partial(text.clone()));
+            if let Some(t) = text {
+                if !t.is_empty() {
+                    sink.push(SubtitleEvent::Partial(t.clone()));
+                    pending.push_str(t);
+                }
             }
         }
-        QwenEvent::Completed { transcript, .. } => {
-            LAST_TEXT_LEN.store(0, Ordering::Relaxed);
-            if !transcript.trim().is_empty() {
-                sink.push(SubtitleEvent::Final(transcript.trim().to_string()));
+
+        // ---- 累积稳定文本：只推送相对 pending 新增的部分 ----
+        QwenEvent::ResponseTextText { text, stash } => {
+            if let Some(s) = text.as_deref().or(stash.as_deref()) {
+                accumulate(s, sink, pending);
             }
         }
+        QwenEvent::AudioTranscriptText { text, stash } => {
+            if let Some(s) = text.as_deref().or(stash.as_deref()) {
+                accumulate(s, sink, pending);
+            }
+        }
+        QwenEvent::TranscriptionText { text, stash } => {
+            if let Some(s) = text.as_deref().or(stash.as_deref()) {
+                accumulate(s, sink, pending);
+            }
+        }
+
+        // ---- 一段完整结果：收尾并进历史 ----
+        QwenEvent::ResponseTextDone { text } | QwenEvent::AudioTranscriptDone { text } => {
+            finalize_sentence(text.as_deref().unwrap_or("").trim(), sink, pending);
+        }
+        QwenEvent::Completed { transcript } => {
+            finalize_sentence(transcript.as_deref().unwrap_or("").trim(), sink, pending);
+        }
+
         QwenEvent::Error { error } => {
             warn!(?error, "qwen error event");
         }
         _ => {}
     }
+  }
+
+  /// 服务端发来的文本 s 是「到目前为稳定的累积内容」。若它是在我们已显示
+  /// 文本上的增长就只推新增；若服务器重开一轮（新的 commit / 修正）就把
+  /// 上一句收尾，再用 s 新起一行。
+  fn accumulate(s: &str, sink: &SubtitleSink, pending: &mut String) {
+    if s.starts_with(pending.as_str()) {
+        let pc = pending.chars().count();
+        let suffix: String = s.chars().skip(pc).collect();
+        if !suffix.is_empty() {
+            sink.push(SubtitleEvent::Partial(suffix));
+            *pending = s.to_string();
+        }
+    } else if pending.is_empty() {
+        // 新一句的起点。
+        sink.push(SubtitleEvent::Partial(s.to_string()));
+        *pending = s.to_string();
+    } else {
+        // 服务器切换到了新的一轮：先收尾上一句，再开新行显示 s。
+        sink.push(SubtitleEvent::Final(pending.clone()));
+        *pending = s.to_string();
+        sink.push(SubtitleEvent::Partial(s.to_string()));
+    }
+  }
+
+  /// 一轮结果收尾：优先用服务端给的完整文本（可能修正/补全 partial），
+  /// 否则用我们累积的文本。收尾后清空 pending。
+  fn finalize_sentence(s: &str, sink: &SubtitleSink, pending: &mut String) {
+    if !s.is_empty() {
+        sink.push(SubtitleEvent::Final(s.to_string()));
+    } else if !pending.is_empty() {
+        sink.push(SubtitleEvent::Final(pending.clone()));
+    }
+    pending.clear();
   }
 }
 

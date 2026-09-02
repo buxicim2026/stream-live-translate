@@ -73,6 +73,20 @@
         <input id="translate_chinese" type="checkbox" />
         <span data-i18n="llm.translate_zh">对中文也调用翻译（默认否，节省 token）</span>
       </label>
+      <label class="row">
+        <input id="low_latency" type="checkbox" />
+        <span data-i18n="llm.lowlat">低延迟模式：不等一句话说完，字幕边说边出</span>
+      </label>
+      <label id="low_latency_ms_row" class="row" style="display:none">
+        <span data-i18n="llm.lowlat.ms">分段时长</span>
+        <select id="segment_ms">
+          <option value="800">0.8 秒</option>
+          <option value="1200" selected>1.2 秒</option>
+          <option value="1600">1.6 秒</option>
+        </select>
+      </label>
+      <p class="hint" id="low_latency_hint" style="display:none"
+         data-i18n="llm.lowlat.hint">开启后每段约 1–1.5 秒即出，适合实时同传；延迟低但长句会被切短。中文直播只要中文字幕时，建议把模型换成 qwen3-asr-flash-realtime（ASR）效果最佳。</p>
     </section>
 
     <section class="card">

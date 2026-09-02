@@ -47,6 +47,13 @@ pub struct LlmConfig {
     pub translate_chinese: bool,
     /// Optional extra system prompt hint.
     pub system_prompt: Option<String>,
+    /// 低延迟分段（毫秒）。0 = 关闭：沿用服务端 server_vad，等一句话说完
+    /// 才整句返回（句子完整，但延迟≈整句话时长）。
+    /// >0 = 开启：本机累计「正在说」的语音，每满该毫秒就发一次
+    /// `input_audio_buffer.commit`，把当前已说的这一段提前识别/翻译并输出，
+    /// 字幕按段持续推进，延迟可压到 ~1–2 秒（代价：长句被切成短段）。
+    #[serde(default)]
+    pub segment_ms: u64,
 }
 
 fn default_ingest_port() -> u16 {
@@ -177,6 +184,7 @@ impl Default for Config {
                 target_lang: "zh".into(),
                 translate_chinese: false,
                 system_prompt: None,
+                segment_ms: 0,
             },
             audio: AudioConfig {
                 mode: "system".into(),

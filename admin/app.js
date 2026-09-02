@@ -50,6 +50,9 @@
       "llm.baseurl.ph": "留空使用内置默认地址",
       "llm.target": "翻译目标语言",
       "llm.translate_zh": "对中文也调用翻译（默认否，节省 token）",
+      "llm.lowlat": "低延迟模式：不等一句话说完，字幕边说边出",
+      "llm.lowlat.ms": "分段时长",
+      "llm.lowlat.hint": "开启后每段约 1–1.5 秒即出，适合实时同传；延迟低但长句会被切短。中文直播只要中文字幕时，建议把模型换成 qwen3-asr-flash-realtime（ASR）效果最佳。",
 
       "lang.zh": "中文",
       "lang.en": "英语",
@@ -163,6 +166,9 @@
       "llm.baseurl.ph": "Leave empty for the built-in default",
       "llm.target": "Target language",
       "llm.translate_zh": "Also translate Chinese input (off by default, saves tokens)",
+      "llm.lowlat": "Low-latency mode: show subtitles while speaking, no need to wait for a full sentence",
+      "llm.lowlat.ms": "Segment length",
+      "llm.lowlat.hint": "When on, a subtitle segment appears every ~1–1.5s — great for live interpretation; latency is low but long sentences get split. For Chinese livestreams that only need Chinese captions, switch the model to qwen3-asr-flash-realtime (ASR) for best results.",
 
       "lang.zh": "Chinese",
       "lang.en": "English",
@@ -489,6 +495,32 @@
     return (PROVIDER_HINTS[currentLang] || PROVIDER_HINTS.zh)[providerType];
   }
 
+  /// 低延迟模式：勾选 → 显示分段时长选择；取消 → 退回整句模式。
+  function syncLowLatencyRows(on) {
+    const row = $("low_latency_ms_row");
+    const hint = $("low_latency_hint");
+    if (row) row.style.display = on ? "" : "none";
+    if (hint) hint.style.display = on ? "" : "none";
+  }
+
+  /// 用已保存的 segment_ms 同步低延迟控件状态。
+  function syncLowLatency(segmentMs) {
+    const on = !!segmentMs && Number(segmentMs) > 0;
+    const cb = $("low_latency");
+    if (!cb) return;
+    cb.checked = on;
+    const sel = $("segment_ms");
+    if (sel && on) {
+      const v = String(segmentMs);
+      if (![...sel.options].some((o) => o.value === v)) {
+        sel.value = "1200";
+      } else {
+        sel.value = v;
+      }
+    }
+    syncLowLatencyRows(on);
+  }
+
   function fillForm(cfg) {
     // Determine provider type from internal provider name
     let providerType = "online";
@@ -509,6 +541,7 @@
     $("endpoint").value = cfg.llm.endpoint || "";
     $("target_lang").value = cfg.llm.target_lang || "zh";
     $("translate_chinese").checked = cfg.llm.translate_chinese;
+    syncLowLatency(cfg.llm.segment_ms || 0);
 
     // Defensive: if the config's mode isn't among the options
     const modeSel = $("audio-mode");
@@ -747,6 +780,10 @@
         endpoint: $("endpoint").value.trim() || null,
         target_lang: $("target_lang").value,
         translate_chinese: $("translate_chinese").checked,
+        // 低延迟模式：勾选才写分段时长；否则存 0 = 整句模式。
+        segment_ms: ($("low_latency") && $("low_latency").checked)
+          ? (Number($("segment_ms").value) || 1200)
+          : 0,
       },
       audio: {
         mode: $("audio-mode").value,
@@ -927,6 +964,8 @@
 
   // Wire up events.
   $("provider-type").addEventListener("change", updateProviderUI);
+  const lowLatCb = $("low_latency");
+  if (lowLatCb) lowLatCb.addEventListener("change", () => syncLowLatencyRows(lowLatCb.checked));
   $("ov-bg-opacity").addEventListener("input", (e) => {
     $("ov-opacity-display").textContent = e.target.value + "%";
   });
