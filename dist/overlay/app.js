@@ -140,10 +140,14 @@
 
   let pageStart = 0; // 当前这句在完整文本中的起始字符下标
 
-  /// 把 s 写进字幕并读出它占多少像素高（写入即测量，省一次 DOM 操作）。
+  /// 把 s 写进字幕测高度，读完立即恢复原文本 —— 绝不能让测量破坏打字机
+  /// 的显示进度。
   function measureHeight(s) {
+    const prev = textEl.textContent;
     textEl.textContent = s;
-    return textEl.scrollHeight;
+    const h = textEl.scrollHeight;
+    textEl.textContent = prev;
+    return h;
   }
 
   /**
@@ -170,31 +174,116 @@
   /// 渲染完整累积文本中「当前这句」。
   function renderCaption(full) {
     if (!textEl) return;
-    if (maxLines <= 1) {
-      // 严格单行：交给 CSS 的 text-overflow 出省略号。
-      textEl.textContent = full;
-      return;
-    }
+    const shown = pickShown(full);
+    displayShown(shown);
+  }
+
+  /// 决定应显示哪一段：单行模式全文给 CSS 省略号；多行超限时从溢出处另起。
+  function pickShown(full) {
+    if (maxLines <= 1) return full;
     const lh = parseFloat(getComputedStyle(captionEl).lineHeight) || 0;
     const maxH = maxLines * lh;
-    if (maxH <= 0) {
-      textEl.textContent = full;
-      return;
-    }
+    if (maxH <= 0) return full;
     // 文本被替换成更短的内容时下标会越界，回到开头。
     if (pageStart > full.length) pageStart = 0;
-    // 当前这句放不下了，就从溢出处另起一句（整块替换，不逐行推进，
-    // 所以看起来是「换了一句」而不是在滚动）。
     if (measureHeight(full.slice(pageStart)) > maxH) {
       pageStart = findCut(full, pageStart, maxH);
     }
-    const shown = full.slice(pageStart);
-    if (textEl.textContent !== shown) textEl.textContent = shown;
+    return full.slice(pageStart);
   }
 
   /// 文字或行数/字号变化后重画当前这句。
   function refreshCaption() {
     renderCaption(currentText);
+  }
+
+  // ---- 逐单位显示（打字机） ---------------------------------------------
+  // typewriter 动画模式：字幕按语言粒度「逐一蹦出」——
+  //   * 拉丁语系（英/法/西等，空格分词）→ 一个词一个词出现
+  //   * 中日韩（无空格分词）→ 一个字一个字蹦出来
+  // 由字幕文本内容判定：含 CJK（汉字/假名/谚文）逐字，否则逐词。这也与
+  // config 的 target_lang 天然一致（日/韩/中目标 → 文本必是 CJK）。
+  //
+  // 与流式 partial 协同：partial 追加时只是把目标文本变长，打字游标不动，
+  // 继续把新增内容逐单位打出来；整句（mock / final / 重连快照）一次到达时
+  // 则自动从当前显示处往下打，观感接近实时。
+
+  const TYPE_WORD_MS = 75;  // 拉丁语：一个词间隔（ms）
+  const TYPE_CHAR_MS = 45;  // CJK：一个字间隔（ms）
+  let typeTimer = null;
+  let typeMode = "word";
+  let typeTarget = "";      // 期望显示的整段
+  let typePos = 0;          // 已打到的字符下标
+
+  function isTypewriterMode() {
+    return document.body.classList.contains("animation-typewriter");
+  }
+
+  function setUnitMode(text) {
+    typeMode = /[\u3040-\u30ff\uac00-\ud7af\u4e00-\u9fff]/.test(text)
+      ? "char"
+      : "word";
+  }
+
+  /// 返回从 from 起一个单位的结束下标（char 一个码点；word 一段连续同类）。
+  function nextUnitEnd(text, from) {
+    if (from >= text.length) return text.length;
+    if (typeMode === "char") {
+      const cp = text.codePointAt(from);
+      return from + (cp > 0xffff ? 2 : 1);
+    }
+    let i = from;
+    const ws = /\s/.test(text[i]);
+    while (i < text.length && /\s/.test(text[i]) === ws) i++;
+    return i;
+  }
+
+  function stopTyping() {
+    if (typeTimer) { clearTimeout(typeTimer); typeTimer = null; }
+  }
+
+  /// 隐藏 / 换字幕时重置打字机。
+  function resetTyping() {
+    stopTyping();
+    typeTarget = "";
+    typePos = 0;
+  }
+
+  function typeTick() {
+    typeTimer = null;
+    if (typePos >= typeTarget.length) return; // 打完了
+    typePos = nextUnitEnd(typeTarget, typePos);
+    textEl.textContent = typeTarget.slice(0, typePos);
+    if (typePos < typeTarget.length) {
+      typeTimer = setTimeout(typeTick, typeMode === "word" ? TYPE_WORD_MS : TYPE_CHAR_MS);
+    }
+  }
+
+  /// 把应显示内容交出去：typewriter 模式走打字机，其余模式整段即时显示。
+  function displayShown(shown) {
+    if (!textEl) return;
+    if (!isTypewriterMode()) {
+      stopTyping();
+      if (textEl.textContent !== shown) textEl.textContent = shown;
+      return;
+    }
+    // 同一句的延展（partial 追加 / final 收尾）：游标不动，继续打增量。
+    // 全新内容（换句 / 修正）：从头逐单位打。
+    const sameSentence = typeTarget && shown.startsWith(typeTarget);
+    typeTarget = shown;
+    if (!sameSentence) {
+      typePos = 0;
+      setUnitMode(shown);
+      textEl.textContent = "";
+    }
+    if (typePos > typeTarget.length) typePos = typeTarget.length;
+    if (typePos < typeTarget.length) {
+      if (!typeTimer) {
+        typeTimer = setTimeout(typeTick, typeMode === "word" ? TYPE_WORD_MS : TYPE_CHAR_MS);
+      }
+    } else {
+      textEl.textContent = typeTarget;
+    }
   }
 
   // ---- 性能模式 ---------------------------------------------------------
@@ -298,6 +387,7 @@
     captionEl.classList.add("empty");
     captionEl.classList.remove("show");
     pageStart = 0;
+    resetTyping();
     if (textEl) textEl.textContent = "";
   }
 
