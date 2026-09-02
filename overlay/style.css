@@ -71,18 +71,37 @@ body.position-middle { align-items: center; }
   opacity: 0;
 }
 
-/* 默认一行；文字放不下时折到第二行，超过上限才用省略号截断。
-   -webkit-line-clamp 的数值由 JS 按 admin 的「最大行数」直接写在元素上
-   （var() 在 -webkit-line-clamp 里兼容性不稳，故不用 CSS 变量）。
-   短句时 shrink-to-fit 让背景刚好包住文字，长句时才撑到两行。 */
+/* 视口：高度贴合内容，但最多 --caption-max-height（= 最大行数 × 行高，
+   由 JS 计算）。短句时背景仍贴合文字，长句才撑到上限。
+   超出上限的部分不再用省略号吞掉，而是由 .caption-inner 上移滚动显示。 */
 .caption-line {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  display: block;
   min-width: 0;
   max-width: 100%;
+  max-height: var(--caption-max-height, none);
+  overflow: hidden;
+}
+
+/* 承载文字的内层。transform 不影响布局，所以外层视口高度保持稳定，
+   滚动时背景高度不会跳动。时长由 JS 按滚动距离下发。 */
+.caption-inner {
+  display: block;
+  width: 100%;
+  transition: transform 260ms linear;
+}
+/* 滚动中把文字提为独立合成层，避免每帧重绘文字 */
+.caption-line.scrolling .caption-inner { will-change: transform; }
+
+/* 最大行数 = 1：严格单行，不折行；超出用省略号（无垂直滚动）。 */
+.caption-line.single-line {
+  max-height: none;
+}
+.caption-line.single-line .caption-inner {
+  transition: none;
+  transform: none !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 body.layout-double .caption { font-size: 40px; }
@@ -113,3 +132,11 @@ body.animation-slide .caption.show { transform: translateY(0); }
 /* Color / size helpers overridden by JS. */
 .caption { color: var(--caption-color, #FFFFFF); }
 .caption { font-size: var(--caption-size, 48px); }
+
+/* 性能模式（admin 面板「切换到性能模式」按钮，同源 localStorage 同步过来）：
+   backdrop-filter 每帧都要对背景重新采样合成，是集显上最贵的一项，关掉它。
+   背景色本身不受影响，观感几乎一致。 */
+body.perf-mode .caption {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}

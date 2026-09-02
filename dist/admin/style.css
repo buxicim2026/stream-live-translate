@@ -262,6 +262,44 @@ a:hover { text-decoration: underline; }
 /* 错开各卡片的高光时机，避免整屏同步闪动显得机械 */
 .card:nth-child(2n)::after { animation-delay: -3.1s; }
 .card:nth-child(3n)::after { animation-delay: -5.7s; }
+
+/* 性能模式按钮 */
+.perf-btn {
+  /* auto 外边距吸收剩余空间，把按钮推到右侧紧贴状态条，
+     否则 space-between 会让它孤零零停在顶栏正中。 */
+  margin-left: auto;
+  margin-right: 14px;
+  flex: 0 0 auto;
+  padding: 7px 15px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background-color: rgba(255, 255, 255, 0.10);
+  background-image: linear-gradient(150deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.05) 100%);
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.2s, background-color 0.2s, transform 0.15s;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+.perf-btn:hover {
+  border-color: rgba(255, 255, 255, 0.38);
+  background-color: rgba(255, 255, 255, 0.16);
+}
+.perf-btn:active { transform: scale(0.97); }
+/* 性能模式开启后按钮变为高亮的"已生效"状态 */
+body.perf-mode .perf-btn {
+  background-color: rgba(74, 222, 128, 0.18);
+  background-image: none;
+  border-color: rgba(74, 222, 128, 0.55);
+  color: #b8f5c8;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
 .card:hover {
   border-color: var(--glass-border-bright);
   box-shadow:
@@ -457,16 +495,31 @@ a:hover { text-decoration: underline; }
   overflow: hidden;
 }
 #preview-line {
-  /* 与 overlay 一致：默认一行，放不下折到第二行，超上限才省略 */
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  -webkit-box-orient: vertical;
+  /* 与 overlay 一致：视口高度 = 最大行数 × 行高（--preview-max-height 由
+     JS 按字号算出）。短句贴合文字，长句撑到上限，超出的部分滚动显示，
+     不再用省略号吞掉。 */
+  display: block;
   overflow: hidden;
   min-width: 0;
   max-width: 100%;
+  max-height: var(--preview-max-height, none);
   word-break: break-word;
   overflow-wrap: break-word;
+}
+/* 承载文字的内层：transform 不影响布局，滚动时预览框高度不跳动 */
+.preview-inner {
+  display: block;
+  width: 100%;
+  transition: transform 200ms linear;
+}
+/* 最大行数 = 1：严格单行，超出用省略号（无滚动） */
+#preview-line.single-line { max-height: none; }
+#preview-line.single-line .preview-inner {
+  transition: none;
+  transform: none !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .preview-caption.empty { opacity: 0; }
 
@@ -582,6 +635,10 @@ button.ghost:hover {
 
 /* Dock mode */
 body.dock .topbar { padding: 8px 12px; }
+/* dock 里横向空间紧张：缩小按钮并收紧间距 */
+body.dock .perf-btn { padding: 5px 10px; font-size: 11px; margin-right: 10px; }
+body.dock .brand { font-size: 13px; }
+body.dock .brand span:not(.logo) { display: none; }
 body.dock .grid { padding: 10px; gap: 10px; grid-template-columns: 1fr; }
 body.dock .card { padding: 12px 14px; }
 body.dock .card.wide { grid-column: auto; }
@@ -707,4 +764,64 @@ body.dock .history { max-height: 80px; }
   button {
     transition: none;
   }
+}
+
+/* ============================================================
+   性能模式（admin 顶栏「切换到性能模式」按钮切换）
+   面向集显直播：干掉极光动画、毛玻璃模糊与高光扫动，改用纯色背景。
+   backdrop-filter 是最大的开销来源 —— 极光每帧移动都会让所有玻璃
+   元素重新合成，集显上很容易吃满。这里整段放在文件末尾保证覆盖。
+   ============================================================ */
+body.perf-mode,
+body.perf-mode::before,
+body.perf-mode::after {
+  animation: none;
+}
+/* 背景换成静态渐变，不留极光层 */
+body.perf-mode::before,
+body.perf-mode::after {
+  display: none;
+}
+body.perf-mode {
+  background: linear-gradient(150deg, #0b0d1c 0%, #131735 48%, #080a14 100%);
+}
+body.perf-mode .card,
+body.perf-mode .topbar,
+body.perf-mode .toast {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+body.perf-mode .card {
+  background-image: none;
+  background-color: #161a33;
+  border-color: rgba(255, 255, 255, 0.10);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  transition: border-color 0.2s;
+}
+body.perf-mode .card:hover {
+  border-color: rgba(123, 147, 255, 0.45);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  transform: none;
+}
+/* 去掉渐变高光描边与表面扫光（含 @supports 里的那一份） */
+body.perf-mode .card::before,
+body.perf-mode .card::after {
+  display: none;
+}
+body.perf-mode .topbar {
+  background-image: none;
+  background-color: #12142c;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+}
+body.perf-mode .toast {
+  background-image: none;
+  background-color: #23263f;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+body.perf-mode .toast.ok { background-color: #1b3a26; }
+body.perf-mode .toast.error { background-color: #3c1c1c; }
+/* 静态背景较暗，页脚恢复常规字色 */
+body.perf-mode .footer {
+  color: var(--text-muted);
+  text-shadow: none;
 }

@@ -3,13 +3,18 @@
 //     宽、高、圆角、背景透明度改完保存就生效，不必重新生成浏览器源 URL。
 //   * URL hash（#size=&color=&bg=&bgOpacity=&bgWidth=&bgHeight=&radius=…）
 //     优先级最高，用于覆盖已保存的配置。
-//   * 字幕恒为一行；背景默认刚好一行高，可用 bgWidth / bgHeight 固定。
+//   * 字幕背景贴合内容；超过「最大行数」的文字不再被省略号吞掉，
+//     而是滚动显示出来（英文新闻、访谈等长句场景）。
+//   * 宽 / 高 / 圆角可用 bgWidth / bgHeight / radius 固定。
 
 (function () {
   "use strict";
 
   const captionEl = document.getElementById("caption");
   const lineEl = document.getElementById("caption-line");
+  // 文字放在内层 span 里，靠 transform 上移实现滚动；
+  // 外层 .caption-line 作为固定高度的视口裁掉溢出部分。
+  let textEl = null;
   let currentText = "";
   let hideTimer = null;
   let partialBuffer = "";
@@ -52,6 +57,18 @@
 
   // ---- style -------------------------------------------------------------
 
+  /// 把已有内容包进 .caption-inner。动态创建而非改 index.html，
+  /// 这样即使 OBS 缓存了旧版页面也能正常工作。
+  function ensureInner() {
+    if (textEl) return textEl;
+    const inner = document.createElement("span");
+    inner.className = "caption-inner";
+    while (lineEl.firstChild) inner.appendChild(lineEl.firstChild);
+    lineEl.appendChild(inner);
+    textEl = inner;
+    return inner;
+  }
+
   function hexToRgba(hex, alpha) {
     if (!hex || hex[0] !== "#") return null;
     let h = hex.slice(1);
@@ -84,6 +101,7 @@
     radius: 8,
     maxLines: 2,
   };
+  let maxLines = 2;
 
   function renderStyle() {
     const root = document.documentElement.style;
@@ -102,13 +120,134 @@
     const r = Number(style.radius);
     root.setProperty("--caption-radius", (isFinite(r) && r >= 0 ? r : 8) + "px");
 
-    // 行数上限直接写到元素上：var() 在 -webkit-line-clamp 里兼容性不可靠。
-    // 允许到 4 行：两行仍放不下时继续扩展，避免省略号吞掉内容。
+    // 行数上限（1-4）。视口高度 = 行数 × 行高，超出的文字滚动显示。
     let lines = Math.round(Number(style.maxLines));
     if (!isFinite(lines) || lines < 1) lines = 2;
     if (lines > 4) lines = 4;
-    lineEl.style.setProperty("-webkit-line-clamp", String(lines));
-    lineEl.style.setProperty("line-clamp", String(lines));
+    maxLines = lines;
+    lineEl.classList.toggle("single-line", lines <= 1);
+
+    // 视口最大高度按当前字号/行高算出，字号变化时自动跟随。
+    const fs = parseFloat(getComputedStyle(captionEl).fontSize);
+    const lhRaw = parseFloat(getComputedStyle(captionEl).lineHeight);
+    const lh = isFinite(lhRaw) && lhRaw > 0 ? lhRaw : (isFinite(fs) ? fs : 48) * 1.25;
+    root.setProperty("--caption-max-height", (lines * lh).toFixed(2) + "px");
+
+    // 行数 / 字号变了，滚动距离要重新量。
+    restartScroll();
+  }
+
+  // ---- 溢出滚动 ---------------------------------------------------------
+  // 英文新闻、访谈这类长句连「最大行数」都放不下时，旧版会用省略号把后半段
+  // 直接吞掉。这里改成字幕滚动：先在开头停一下，再匀速把后半段「吐」出来，
+  // 滚到底停一下后回到开头循环，保证整句都能看到。
+
+  const SCROLL_ARM_DELAY = 400;    // 流式输出期间等文字稳定，防止动画被打断成抖动
+  const SCROLL_HOLD_TOP = 1000;    // 停在开头的时间
+  const SCROLL_HOLD_BOTTOM = 1200; // 滚到底后的停留时间
+  const SCROLL_SPEED = 40;         // 滚动速度 px/s
+  const SCROLL_MIN_MS = 400;
+  const SCROLL_MAX_MS = 5000;
+  const SCROLL_EPSILON = 2;        // 小于 2px 视为没溢出（亚像素误差）
+
+  let scrollTimer = null;
+  let armTimer = null;
+  let scrollGen = 0;
+
+  /// 立刻停下滚动并回到开头。换字幕 / 隐藏字幕 / 改样式都要调用。
+  function resetScroll() {
+    scrollGen++;
+    if (scrollTimer) { clearTimeout(scrollTimer); scrollTimer = null; }
+    if (armTimer) { clearTimeout(armTimer); armTimer = null; }
+    if (textEl) {
+      textEl.style.transition = "none";
+      textEl.style.transform = "translateY(0)";
+    }
+    lineEl.classList.remove("scrolling");
+  }
+
+  /// 视口外还藏着多少像素的文字（= 需要滚动的距离）。
+  function overflowDistance() {
+    if (!textEl) return 0;
+    return Math.max(0, Math.round(textEl.scrollHeight - lineEl.clientHeight));
+  }
+
+  /// 文字稳定后再量距离开始滚动：流式输出每来一个 delta 就重新计时。
+  function scheduleScroll() {
+    if (armTimer) clearTimeout(armTimer);
+    armTimer = setTimeout(() => {
+      armTimer = null;
+      startScroll();
+    }, SCROLL_ARM_DELAY);
+  }
+
+  function restartScroll() {
+    hideExtended = false;
+    resetScroll();
+    if (currentText) scheduleScroll();
+  }
+
+  function scrollAfter(ms, fn) {
+    const gen = scrollGen;
+    if (scrollTimer) clearTimeout(scrollTimer);
+    scrollTimer = setTimeout(() => {
+      // 期间换了字幕/样式：这一串回调作废。
+      if (gen !== scrollGen) return;
+      scrollTimer = null;
+      fn();
+    }, ms);
+  }
+
+  function startScroll() {
+    if (!textEl || maxLines <= 1) return;
+    const distance = overflowDistance();
+    if (distance <= SCROLL_EPSILON) return; // 没溢出就保持原位
+    lineEl.classList.add("scrolling");
+
+    const dur = Math.min(
+      SCROLL_MAX_MS,
+      Math.max(SCROLL_MIN_MS, Math.round((distance / SCROLL_SPEED) * 1000))
+    );
+    // 长句要靠滚动才看得全：顺延一次自动隐藏时间，保证至少播完一轮，
+    // 否则会被 4 秒的自动隐藏清掉，正好卡在「吐字」的中途。
+    if (hideTimer && !hideExtended) {
+      hideExtended = true;
+      const cycle = SCROLL_HOLD_TOP + dur + SCROLL_HOLD_BOTTOM;
+      if (cycle > HIDE_DELAY) scheduleHide(cycle - HIDE_DELAY);
+    }
+    // 开头停留 → 匀速滚到底 → 底部停留 → 回到开头 → 循环
+    scrollAfter(SCROLL_HOLD_TOP, () => {
+      textEl.style.transition = `transform ${dur}ms linear`;
+      textEl.style.transform = `translateY(${-distance}px)`;
+      scrollAfter(dur + SCROLL_HOLD_BOTTOM, () => {
+        const back = Math.max(240, Math.round(dur * 0.5));
+        textEl.style.transition = `transform ${back}ms ease-out`;
+        textEl.style.transform = "translateY(0)";
+        scrollAfter(back + SCROLL_HOLD_TOP, startScroll);
+      });
+    });
+  }
+
+  // ---- 性能模式 ---------------------------------------------------------
+  // 与 admin 面板共用同一个 localStorage 开关（同源）。集显直播时关掉
+  // backdrop-filter —— 它需要每帧对背景重新采样合成，是最吃 GPU 的一项。
+
+  const PERF_MODE_KEY = "slt.perfMode";
+
+  function applyPerfMode(on) {
+    document.body.classList.toggle("perf-mode", !!on);
+  }
+
+  function initPerfMode() {
+    try {
+      applyPerfMode(localStorage.getItem(PERF_MODE_KEY) === "1");
+    } catch {
+      // localStorage 不可用时保持默认的玻璃效果。
+    }
+    // admin 那边一改，这里立刻跟着变，不必刷新 OBS 浏览器源。
+    window.addEventListener("storage", (ev) => {
+      if (ev.key === PERF_MODE_KEY) applyPerfMode(ev.newValue === "1");
+    });
   }
 
   function setBodyVariant(prefix, value) {
@@ -180,25 +319,30 @@
     if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
     const line = toSingleLine(text);
     currentText = line;
-    // 只做病态输入兜底；真正的「超出多少字」由 CSS line-clamp 处理，
-    // 这样才能在正确的位置显示省略号（JS 截断会提前把句子砍短）。
-    lineEl.textContent = line.length > 400 ? line.slice(0, 400) + "…" : line;
+    // 只做病态输入兜底；超出的部分不再截断，交给滚动显示。
+    ensureInner().textContent = line.length > 1000 ? line.slice(0, 1000) + "…" : line;
     captionEl.classList.remove("empty");
     captionEl.classList.add("show");
+    restartScroll();
   }
 
   function hide() {
     captionEl.classList.add("empty");
     captionEl.classList.remove("show");
-    lineEl.textContent = "";
+    resetScroll();
+    if (textEl) textEl.textContent = "";
   }
 
-  function scheduleHide() {
+  const HIDE_DELAY = 4000;   // 没有新内容时字幕自动隐藏的时间
+  let hideExtended = false;  // 长句顺延过一次就不再顺延，避免字幕一直不消失
+
+  /// extraMs：需要滚动的长句会把隐藏时间往后顺延（见 startScroll）。
+  function scheduleHide(extraMs) {
     if (hideTimer) clearTimeout(hideTimer);
     hideTimer = setTimeout(() => {
       hide();
       recentSentences.length = 0;
-    }, 4000);
+    }, HIDE_DELAY + (extraMs || 0));
   }
 
   function appendPartial(delta) {
@@ -277,12 +421,19 @@
   }
 
   async function init() {
+    ensureInner();
+    initPerfMode();
     // 顺序很关键：先 hash（旧版留下的 URL 参数）再 /api/config，
     // 让服务端配置成为唯一权威来源 —— 这样 admin 改动即时生效，
     // 用户不必重新复制 OBS 浏览器源 URL。
     parseHash();
     await loadConfig();
     connectWS();
+    // 字体加载完成会改变行高，重新量一次滚动距离。
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(restartScroll);
+    }
+    window.addEventListener("resize", restartScroll);
   }
 
   init();

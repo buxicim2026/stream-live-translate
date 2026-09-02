@@ -12,6 +12,10 @@
       <span class="logo">●</span>
       <span>Stream Live Translate</span>
     </div>
+    <button id="perf-mode-btn" class="perf-btn" type="button"
+            title="关闭液态玻璃特效（极光动画、毛玻璃模糊、高光扫动），降低集显占用">
+      切换到性能模式
+    </button>
     <div class="status-strip" id="status-strip">
       <span class="dot" id="dot-audio"></span><span>音频</span>
       <span class="dot" id="dot-llm"></span><span>大模型</span>
@@ -119,7 +123,7 @@
       </label>
       <label>最大行数
         <input id="ov-max-lines" type="number" value="2" min="1" max="4" />
-        <span class="field-note">行数按需增长：短句一行，放不下自动折到 2/3/4 行，超出上限才省略。填 1 = 严格单行。</span>
+        <span class="field-note">行数按需增长：短句一行，放不下自动折到 2/3/4 行。<b>超出上限不再省略，改为自动滚动显示</b>（英文新闻、访谈等长句场景）。填 1 = 严格单行 + 省略号。</span>
       </label>
       <label>背景尺寸（px）
           <div class="size-row">

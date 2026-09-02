@@ -202,6 +202,50 @@
     applyPreviewStyles();
   }
 
+  // ---- 性能模式 ---------------------------------------------------------
+
+  const PERF_MODE_KEY = "slt.perfMode";
+
+  function readPerfMode() {
+    try {
+      return localStorage.getItem(PERF_MODE_KEY) === "1";
+    } catch {
+      // 隐私模式等场景下 localStorage 不可用，退回默认的玻璃效果。
+      return false;
+    }
+  }
+
+  function writePerfMode(on) {
+    try { localStorage.setItem(PERF_MODE_KEY, on ? "1" : "0"); } catch { /* 忽略 */ }
+  }
+
+  function setPerfMode(on) {
+    document.body.classList.toggle("perf-mode", on);
+    const btn = $("perf-mode-btn");
+    if (btn) {
+      btn.textContent = on ? "切换到液态玻璃" : "切换到性能模式";
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+      btn.title = on
+        ? "当前为性能模式（已关闭液态玻璃特效）。点击恢复液态玻璃效果。"
+        : "关闭液态玻璃特效（极光动画、毛玻璃模糊、高光扫动），降低集显占用";
+    }
+    writePerfMode(on);
+  }
+
+  /// 默认开启液态玻璃；已保存的选择会覆盖默认值。
+  /// 只在启动时绑定一次：updateUI 会被轮询和保存反复调用，
+  /// 放进那里会导致重复挂监听（点一下切换多次）。
+  function initPerfMode() {
+    setPerfMode(readPerfMode());
+    const btn = $("perf-mode-btn");
+    if (btn) {
+      btn.addEventListener("click", () => {
+        setPerfMode(!document.body.classList.contains("perf-mode"));
+      });
+    }
+  }
+  initPerfMode();
+
   function hexToRgba(hex, alpha) {
     if (!hex || hex[0] !== "#") return null;
     let h = hex.slice(1);
@@ -245,17 +289,121 @@
     el.style.height = h > 0 ? Math.round(h * k) + "px" : "auto";
     el.style.borderRadius = Math.round(radius * k) + "px";
 
-    // 与 overlay 一致：行数上限直接写在元素上（CSS 变量在
-    // -webkit-line-clamp 里兼容性不可靠）。
+    // 与 overlay 一致：视口高度 = 最大行数 × 行高，超出部分滚动显示。
+    // 这里不再用 -webkit-line-clamp —— 否则预览显示省略号，而 OBS 里在滚动，
+    // 两边观感对不上。
     const lineEl = $("preview-line");
     if (lineEl) {
       const lines = Math.min(4, Math.max(1, num("ov-max-lines", 2)));
-      lineEl.style.setProperty("-webkit-line-clamp", String(lines));
-      lineEl.style.setProperty("line-clamp", String(lines));
+      lineEl.style.removeProperty("-webkit-line-clamp");
+      lineEl.style.removeProperty("line-clamp");
+      lineEl.classList.toggle("single-line", lines <= 1);
+      const lh = parseFloat(getComputedStyle(el).lineHeight) || Math.round(size * k) * 1.25;
+      lineEl.style.setProperty("--preview-max-height", (lines * lh).toFixed(2) + "px");
+      ensurePreviewInner();
+      previewScroller.restart();
     }
 
     stage.className = "preview-stage position-" + ($("ov-position").value || "bottom");
   }
+
+  /// 与 overlay 同样的结构：外层 #preview-line 当视口裁切，
+  /// 文字放进内层 .preview-inner，靠 transform 上移实现滚动。
+  /// 动态创建，避免依赖 index.html 改版。
+  function ensurePreviewInner() {
+    const lineEl = $("preview-line");
+    if (!lineEl) return null;
+    let inner = lineEl.querySelector(".preview-inner");
+    if (!inner) {
+      inner = document.createElement("span");
+      inner.className = "preview-inner";
+      while (lineEl.firstChild) inner.appendChild(lineEl.firstChild);
+      lineEl.appendChild(inner);
+    }
+    return inner;
+  }
+
+  /// 「超出最大行数就滚动把字吐出来」的控制器，逻辑与 overlay 一致。
+  /// 预览区用它还原 OBS 里的真实观感。
+  function createScroller(getLineEl, getInnerEl) {
+    const ARM = 400;          // 等文字稳定的时间
+    const HOLD_TOP = 1000;    // 停在开头的时间
+    const HOLD_BOTTOM = 1200; // 滚到底后的停留时间
+    const SPEED = 40;         // 滚动速度 px/s
+    const MIN_MS = 400;
+    const MAX_MS = 5000;
+    const EPS = 2;            // 小于 2px 视为没溢出（亚像素误差）
+
+    let timer = null;
+    let armTimer = null;
+    let gen = 0;
+
+    function reset() {
+      gen++;
+      if (timer) { clearTimeout(timer); timer = null; }
+      if (armTimer) { clearTimeout(armTimer); armTimer = null; }
+      const inner = getInnerEl();
+      if (inner) {
+        inner.style.transition = "none";
+        inner.style.transform = "translateY(0)";
+      }
+      const lineEl = getLineEl();
+      if (lineEl) lineEl.classList.remove("scrolling");
+    }
+
+    function after(ms, fn) {
+      const myGen = gen;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        // 期间换了字幕或样式：这一串回调作废。
+        if (myGen !== gen) return;
+        timer = null;
+        fn();
+      }, ms);
+    }
+
+    function run() {
+      const lineEl = getLineEl();
+      const inner = getInnerEl();
+      if (!lineEl || !inner) return;
+      if (lineEl.classList.contains("single-line")) return;
+      const distance = Math.max(0, Math.round(inner.scrollHeight - lineEl.clientHeight));
+      if (distance <= EPS) return; // 没溢出就保持原位
+      lineEl.classList.add("scrolling");
+
+      const dur = Math.min(
+        MAX_MS,
+        Math.max(MIN_MS, Math.round((distance / SPEED) * 1000))
+      );
+      // 开头停留 → 匀速滚到底 → 底部停留 → 回到开头 → 循环
+      after(HOLD_TOP, () => {
+        inner.style.transition = `transform ${dur}ms linear`;
+        inner.style.transform = `translateY(${-distance}px)`;
+        after(dur + HOLD_BOTTOM, () => {
+          const back = Math.max(240, Math.round(dur * 0.5));
+          inner.style.transition = `transform ${back}ms ease-out`;
+          inner.style.transform = "translateY(0)";
+          after(back + HOLD_TOP, run);
+        });
+      });
+    }
+
+    function restart() {
+      reset();
+      if (armTimer) clearTimeout(armTimer);
+      armTimer = setTimeout(() => {
+        armTimer = null;
+        run();
+      }, ARM);
+    }
+
+    return { reset: reset, restart: restart };
+  }
+
+  const previewScroller = createScroller(
+    () => $("preview-line"),
+    () => ensurePreviewInner()
+  );
 
   // Update UI based on selected provider type
   function updateProviderUI() {
@@ -466,12 +614,16 @@
 
   function showPreview(text) {
     const el = $("preview-caption");
-    $("preview-line").textContent = text;
+    const inner = ensurePreviewInner();
+    if (inner) inner.textContent = text;
     el.classList.remove("empty");
+    previewScroller.restart();
   }
 
   function clearPreview() {
-    $("preview-line").textContent = "";
+    previewScroller.reset();
+    const inner = ensurePreviewInner();
+    if (inner) inner.textContent = "";
     $("preview-caption").classList.add("empty");
     lastFinalText = "";
     recentSentences.length = 0;
