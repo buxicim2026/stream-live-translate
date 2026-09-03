@@ -46,6 +46,7 @@ pub fn build(cfg: &LlmConfig) -> Result<Arc<dyn LlmProvider>> {
     match cfg.provider.as_str() {
         "qwen-realtime" => Ok(Arc::new(qwen::QwenRealtime::new(cfg.clone())?)),
         "openai-realtime" => Ok(Arc::new(openai::OpenAiRealtime::new(cfg.clone())?)),
+        "fun-asr-realtime" => Ok(Arc::new(funasr::FunAsr::new(cfg.clone())?)),
         "mock" => Ok(Arc::new(mock::MockProvider::new(cfg.clone())?) as Arc<dyn LlmProvider>),
         other => Err(anyhow!("unknown LLM provider `{other}`")),
     }
@@ -565,7 +566,13 @@ pub mod openai {
             // 实时字幕模式：开启「用户语音转写」通道（OpenAI / GLM 等 OpenAI
             // 兼容 realtime）。OpenAI 官方端点默认用 gpt-4o-mini-transcribe；
             // 其它厂商（如 GLM）没有明确子模型名时先用会话主模型名试探。
-            let transcribe_mode = self.cfg.transcribe;
+            // 实时字幕模式：仅当非「本机网关模式」时生效——网关（如
+            // huggingface/speech-to-speech 这类本地 OpenAI Realtime 兼容服务）
+            // 直接把要显示的字幕文字经 response.text.* 返回，不需要再等
+            // input_audio_transcription 事件。
+            let transcribe_mode = self.cfg.transcribe && !self.cfg.gateway_text;
+            let segment_ms = self.cfg.segment_ms;
+            let gateway_text = self.cfg.gateway_text;
             if transcribe_mode {
                 let default_tm = if self.endpoint.to_lowercase().contains("api.openai.com") {
                     "gpt-4o-mini-transcribe".to_string()
@@ -626,6 +633,32 @@ pub mod openai {
             };
 
             let write = async move {
+                // 分段 commit（低延迟/网关模式用）。网关模式下提交后还要补发
+                // response.create，否则很多 OpenAI 兼容服务不会真正产出文本。
+                macro_rules! do_commit {
+                    () => {{
+                        let c = serde_json::json!({ "type": "input_audio_buffer.commit" });
+                        if write_half.send(Message::Text(c.to_string().into())).await.is_err() {
+                            break;
+                        }
+                        if gateway_text {
+                            let cr = serde_json::json!({ "type": "response.create" });
+                            if write_half
+                                .send(Message::Text(cr.to_string().into()))
+                                .await
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
+                    }};
+                }
+
+                let commit_enabled = segment_ms > 0;
+                let mut voiced_ms: u64 = 0; // 自上次 commit 起的有声时长(ms)
+                let mut tail_ms: u64 = 0; // 有声结束后跟随的静音时长(ms)
+                let mut has_voiced = false;
+
                 while let Some(chunk) = audio_rx.recv().await {
                     let mut bytes = Vec::with_capacity(chunk.len() * 2);
                     for s in &chunk {
@@ -639,6 +672,232 @@ pub mod openai {
                     if write_half.send(Message::Text(msg.to_string().into())).await.is_err() {
                         break;
                     }
+                    if !commit_enabled {
+                        continue;
+                    }
+
+                    let ms = (chunk.len() as u64) * 1000 / 16_000;
+                    if crate::vad::rms(&chunk) >= 0.008 {
+                        voiced_ms = voiced_ms.saturating_add(ms);
+                        has_voiced = true;
+                        tail_ms = 0;
+                        if voiced_ms >= segment_ms {
+                            do_commit!();
+                            voiced_ms = 0;
+                            tail_ms = 0;
+                        }
+                    } else if has_voiced {
+                        tail_ms = tail_ms.saturating_add(ms);
+                        if tail_ms >= 400 {
+                            do_commit!();
+                            voiced_ms = 0;
+                            tail_ms = 0;
+                            has_voiced = false;
+                        }
+                    }
+                }
+                // 会话结束前把尾巴交出去（网关模式下补 response.create 让结果出来）。
+                if commit_enabled && (has_voiced || voiced_ms > 0) {
+                    let c = serde_json::json!({ "type": "input_audio_buffer.commit" });
+                    let _ = write_half.send(Message::Text(c.to_string().into())).await;
+                    if gateway_text {
+                        let cr = serde_json::json!({ "type": "response.create" });
+                        let _ = write_half.send(Message::Text(cr.to_string().into())).await;
+                    }
+                }
+            };
+
+            tokio::select! {
+                _ = read => {}
+                _ = write => {}
+            }
+            Ok(())
+        }
+    }
+}
+
+// ---------- FunASR 本地流式识别 ----------
+// 适配阿里 FunASR 私有化部署的实时识别 WebSocket 服务（funasr-wss 风格的
+// Docker 一键部署：启动后默认 ws://127.0.0.1:10095，服务端已加载 SenseVoice /
+// Fun-ASR-Nano / Paraformer 等流式模型）。协议与 OpenAI Realtime 不同：
+//   1) 先发一段 JSON 起始消息（mode=2pass、chunk_size、is_speaking=true…）
+//   2) 之后持续发送 16k 单声道 s16le PCM 二进制帧
+//   3) 说话结束：发 {"is_speaking": false} 触发服务端出该句最终文本
+// 服务端回 JSON：mode 含 online/2pass 的中间结果（text）、offline 的最终结果
+// （text / is_final）。本 provider 把中间结果按增量显示为字幕、最终结果收尾。
+
+pub mod funasr {
+    use super::*;
+
+    const DEFAULT_ENDPOINT: &str = "ws://127.0.0.1:10095";
+
+    pub struct FunAsr {
+        cfg: LlmConfig,
+        endpoint: String,
+    }
+
+    impl FunAsr {
+        pub fn new(cfg: LlmConfig) -> Result<Self> {
+            let endpoint = cfg
+                .endpoint
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| DEFAULT_ENDPOINT.to_string());
+            if !endpoint.starts_with("ws://") && !endpoint.starts_with("wss://") {
+                return Err(anyhow!(
+                    "FunASR 端点必须是 WebSocket 地址，例如 ws://127.0.0.1:10095"
+                ));
+            }
+            Ok(Self { cfg, endpoint })
+        }
+    }
+
+    #[async_trait]
+    impl LlmProvider for FunAsr {
+        fn name(&self) -> &'static str {
+            "fun-asr-realtime"
+        }
+
+        async fn run(
+            self: Arc<Self>,
+            mut audio_rx: tokio::sync::mpsc::Receiver<Vec<i16>>,
+            sink: SubtitleSink,
+        ) -> Result<()> {
+            let url = self.endpoint.clone();
+            let (ws, _resp) = tokio_tungstenite::connect_async(url)
+                .await
+                .map_err(|e| anyhow!("连接 FunASR 服务失败：{e}"))?;
+            let (mut write_half, mut read_half) = ws.split();
+
+            // 起始配置：2pass 模式 = 说话过程中实时给中间结果，语音段结束给最终结果。
+            // chunk_size=[5,10,5] 是常见实时配置（5*10ms 前/后文+10*10ms 主块）。
+            let start = serde_json::json!({
+                "mode": "2pass",
+                "chunk_size": [5, 10, 5],
+                "wav_name": "stream-live-translate",
+                "is_speaking": true,
+                "itn": true
+            });
+            write_half
+                .send(Message::Text(start.to_string().into()))
+                .await
+                .map_err(|e| anyhow!("发送 FunASR 起始消息失败：{e}"))?;
+
+            let sink_read = sink.clone();
+            let read = async move {
+                let mut seg_partial = String::new(); // 当前句已显示的累计文本
+                while let Some(msg) = read_half.next().await {
+                    let msg = match msg {
+                        Ok(m) => m,
+                        Err(e) => {
+                            warn!(error=%e, "funasr ws read error");
+                            break;
+                        }
+                    };
+                    let Message::Text(t) = msg else { continue };
+                    let Ok(v) = serde_json::from_str::<serde_json::Value>(&t) else {
+                        continue;
+                    };
+                    let mtype = v.get("mode").and_then(|s| s.as_str()).unwrap_or("");
+                    let text = v
+                        .get("text")
+                        .and_then(|s| s.as_str())
+                        .or_else(|| {
+                            v.get("sentence")
+                                .and_then(|s| s.get("text"))
+                                .and_then(|s| s.as_str())
+                        })
+                        .unwrap_or("");
+                    if text.trim().is_empty() {
+                        continue;
+                    }
+                    let is_final = mtype.to_lowercase().contains("offline")
+                        || mtype.to_lowercase().contains("final")
+                        || v.get("is_final").and_then(|b| b.as_bool()).unwrap_or(false);
+                    if is_final {
+                        // 一句话的最终识别：收尾并进历史。
+                        let t = text.trim().to_string();
+                        sink_read.push(SubtitleEvent::Final(t));
+                        seg_partial.clear();
+                    } else {
+                        // 中间（在线）结果：只推送相对已显示文本的新增部分。
+                        if text.starts_with(seg_partial.as_str()) {
+                            let pc = seg_partial.chars().count();
+                            let suffix: String = text.chars().skip(pc).collect();
+                            if !suffix.is_empty() {
+                                sink_read.push(SubtitleEvent::Partial(suffix));
+                                seg_partial = text.to_string();
+                            }
+                        } else {
+                            // 服务端另起一段/修正：把上一段收尾，再开新行。
+                            if !seg_partial.is_empty() {
+                                sink_read.push(SubtitleEvent::Final(seg_partial.clone()));
+                            }
+                            seg_partial = text.to_string();
+                            sink_read.push(SubtitleEvent::Partial(text.to_string()));
+                        }
+                    }
+                }
+            };
+
+            let write = async move {
+                // 本地能量检测：说话停顿约 450ms 就通知服务端结束一段
+                // （{"is_speaking": false}），让 2pass 模式出该句最终文本；再出声就
+                // 翻转回 true 开新段。FunASR 服务端先收一段 JSON 起始消息、随后只收
+                // 二进制 PCM，期间允许随时插入这种 JSON 控制帧。
+                macro_rules! seg_flag {
+                    ($sp:expr) => {{
+                        let m = serde_json::json!({ "is_speaking": $sp });
+                        if write_half
+                            .send(Message::Text(m.to_string().into()))
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }};
+                }
+
+                let mut speaking = true;
+                let mut silent_ms: u64 = 0;
+
+                while let Some(chunk) = audio_rx.recv().await {
+                    if chunk.is_empty() {
+                        continue;
+                    }
+                    let mut bytes = Vec::with_capacity(chunk.len() * 2);
+                    for s in &chunk {
+                        bytes.extend_from_slice(&s.to_le_bytes());
+                    }
+                    // 根据语音/静音决定是否需要先翻转 is_speaking。
+                    let ms = (chunk.len() as u64) * 1000 / 16_000;
+                    let voiced = crate::vad::rms(&chunk) >= 0.008;
+                    if voiced {
+                        if !speaking {
+                            seg_flag!(true);
+                            speaking = true;
+                        }
+                        silent_ms = 0;
+                    } else {
+                        silent_ms = silent_ms.saturating_add(ms);
+                        if speaking && silent_ms >= 450 {
+                            seg_flag!(false);
+                            speaking = false;
+                            silent_ms = 0;
+                        }
+                    }
+                    if write_half
+                        .send(Message::Binary(bytes.into()))
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                // 收尾：让服务端出最后一句话的最终文本（循环已结束，忽略发送结果）。
+                if speaking {
+                    let m = serde_json::json!({ "is_speaking": false });
+                    let _ = write_half.send(Message::Text(m.to_string().into())).await;
                 }
             };
 

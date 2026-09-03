@@ -18,6 +18,7 @@ system_prompt = ""
 segment_ms = 0    # 低延迟分段(毫秒)：0=整句模式；800~1600=字幕边说边出，中文直播建议配 qwen3-asr-flash-realtime
 transcribe = false          # 实时字幕模式（GLM/OpenAI 通道）：只显示说话人语音转写，忽略模型回复
 transcription_model = ""    # 转写子模型：留空自动（OpenAI 官方默认 gpt-4o-mini-transcribe；GLM 通常不用填）
+gateway_text = false        # 本机网关模式（local 通道）：网关返回的 response.text 直接当字幕（如 huggingface/speech-to-speech）
 
 [audio]
 mode = "system"             # "system" = 系统音频环回；"device" = 选指定设备；

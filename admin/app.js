@@ -51,9 +51,17 @@
       "llm.target": "翻译目标语言",
       "llm.translate_zh": "对中文也调用翻译（默认否，节省 token）",
       "llm.provider.glm": "智谱 GLM-Realtime",
+      "llm.provider.funasr": "FunASR 本地流式识别（自部署）",
       "llm.transcribe": "实时字幕模式：只显示“说话人的语音转写”，忽略模型自己的回复（GLM / OpenAI 语音对话模型用）",
       "llm.transcribe.model": "转写子模型",
       "llm.transcribe.model.hint": "留空自动（OpenAI 默认 gpt-4o-mini-transcribe；GLM 通常不用填）",
+      "llm.gateway": "本机网关模式：网关返回的文字（response.text）直接当字幕。适用于 huggingface/speech-to-speech 这类“本地 OpenAI Realtime 兼容”网关",
+      "guide.open": "模型适配说明",
+      "guide.title": "模型适配说明",
+      "guide.close": "关闭",
+      "guide.body": "<p>本插件只能使用能<strong>实时接收语音、并边听边返回字幕文字</strong>的<strong>语音（多模态）Realtime</strong> 模型。</p><p><strong>可用：</strong>通义 Qwen Realtime 语音（同传 / ASR / Qwen-Audio）、智谱 GLM-Realtime、OpenAI Realtime、FunASR 本地流式识别，以及 OpenAI 兼容的本地 Realtime 网关。</p><p><strong>不可用：</strong>纯文本 / 纯视觉模型、纯语音合成（TTS）、非实时流式接口——它们无法“听”实时音频，接上也不会有字幕。</p>",
+      "support.btn": "支持本项目",
+      "support.coming": "该入口暂未开放，敬请期待。",
       "llm.lowlat": "低延迟模式：不等一句话说完，字幕边说边出",
       "llm.lowlat.ms": "分段时长",
       "llm.lowlat.hint": "开启后每段约 1–1.5 秒即出，适合实时同传；延迟低但长句会被切短。中文直播只要中文字幕时，建议把模型换成 qwen3-asr-flash-realtime（ASR）效果最佳。",
@@ -171,9 +179,17 @@
       "llm.target": "Target language",
       "llm.translate_zh": "Also translate Chinese input (off by default, saves tokens)",
       "llm.provider.glm": "Zhipu GLM-Realtime",
+      "llm.provider.funasr": "FunASR local streaming ASR (self-hosted)",
       "llm.transcribe": "Caption mode: show only the speaker's speech transcription, ignore the model's own replies (for GLM / OpenAI voice models)",
       "llm.transcribe.model": "Transcription model",
       "llm.transcribe.model.hint": "Leave empty for auto (OpenAI defaults to gpt-4o-mini-transcribe; GLM usually needs none)",
+      "llm.gateway": "Local gateway mode: use the gateway's returned text (response.text) directly as captions — for local OpenAI-Realtime-compatible gateways such as huggingface/speech-to-speech",
+      "guide.open": "Model compatibility",
+      "guide.title": "Model compatibility",
+      "guide.close": "Close",
+      "guide.body": "<p>This plugin needs <strong>speech (multimodal) Realtime</strong> models that can <strong>receive streaming audio and return caption text on the fly</strong>.</p><p><strong>Works:</strong> Qwen Realtime speech (live translation / ASR / Qwen-Audio), Zhipu GLM-Realtime, OpenAI Realtime, FunASR local streaming ASR, and local OpenAI-Realtime-compatible gateways.</p><p><strong>Does not work:</strong> text/vision-only LLMs, pure TTS, or non-realtime streaming APIs — they can't “hear” live audio, so no captions.</p>",
+      "support.btn": "Support this project",
+      "support.coming": "Not available yet — stay tuned.",
       "llm.lowlat": "Low-latency mode: show subtitles while speaking, no need to wait for a full sentence",
       "llm.lowlat.ms": "Segment length",
       "llm.lowlat.hint": "When on, a subtitle segment appears every ~1–1.5s — great for live interpretation; latency is low but long sentences get split. For Chinese livestreams that only need Chinese captions, switch the model to qwen3-asr-flash-realtime (ASR) for best results.",
@@ -397,6 +413,7 @@
     "glm": "openai-realtime",
     "online": "openai-realtime",
     "local": "openai-realtime",
+    "funasr": "fun-asr-realtime",
     "mock": "mock"
   };
 
@@ -450,6 +467,18 @@
         endpointPlaceholder: "例如：ws://localhost:11434/v1/realtime",
         endpointDefault: "ws://localhost:11434/v1/realtime",
         className: "local-hint"
+      },
+      "funasr": {
+        boxHtml: `<strong>🎙️ FunASR 本地流式识别</strong><br />对接本地 FunASR 实时识别服务（SenseVoice / Fun-ASR-Nano / Paraformer 等，Docker 一键部署）。默认 <code>ws://127.0.0.1:10095</code>。服务端自带 VAD/断句，只返回“人说的话”，适合纯本地中文字幕/同传，无云端费用。`,
+        modelPlaceholder: "SenseVoiceSmall（服务端已加载，可留空）",
+        modelSuggestions: [
+          { value: "SenseVoiceSmall", label: "SenseVoiceSmall（多语言，推荐）" },
+          { value: "fun-asr-nano", label: "Fun-ASR-Nano（LLM-ASR）" },
+          { value: "paraformer-zh", label: "Paraformer-zh（普通话）" }
+        ],
+        endpointPlaceholder: "ws://127.0.0.1:10095（FunASR Docker 实时服务默认）",
+        endpointDefault: "ws://127.0.0.1:10095",
+        className: "online-hint"
       },
       "mock": {
         boxHtml: `<strong>🧪 模拟模式</strong><br />本地模拟输出，不联网、不消耗额度，仅用于界面测试。`,
@@ -510,6 +539,18 @@
         endpointDefault: "ws://localhost:11434/v1/realtime",
         className: "local-hint"
       },
+      "funasr": {
+        boxHtml: `<strong>🎙️ FunASR local streaming ASR</strong><br />Connect to a local FunASR realtime server (SenseVoice / Fun-ASR-Nano / Paraformer…, one-command Docker). Default <code>ws://127.0.0.1:10095</code>. The server does VAD/segmentation and returns only what the person says — great for fully-local Chinese captions, no cloud cost.`,
+        modelPlaceholder: "SenseVoiceSmall (already loaded on the server, can be empty)",
+        modelSuggestions: [
+          { value: "SenseVoiceSmall", label: "SenseVoiceSmall (multilingual, recommended)" },
+          { value: "fun-asr-nano", label: "Fun-ASR-Nano (LLM-ASR)" },
+          { value: "paraformer-zh", label: "Paraformer-zh (Mandarin)" }
+        ],
+        endpointPlaceholder: "ws://127.0.0.1:10095 (default FunASR Docker realtime port)",
+        endpointDefault: "ws://127.0.0.1:10095",
+        className: "online-hint"
+      },
       "mock": {
         boxHtml: `<strong>🧪 Mock Mode</strong><br />Local simulated output — no network, no quota, for UI testing only.`,
         modelPlaceholder: "mock",
@@ -563,6 +604,7 @@
     let providerType = "online";
     if (cfg.llm.provider === "qwen-realtime") providerType = "qwen";
     else if (cfg.llm.provider === "mock") providerType = "mock";
+    else if (cfg.llm.provider === "fun-asr-realtime") providerType = "funasr";
     else if (cfg.llm.provider === "openai-realtime") {
       const ep = cfg.llm.endpoint || "";
       if (ep.includes("bigmodel.cn")) {
@@ -584,6 +626,8 @@
     if (trEl) trEl.checked = !!cfg.llm.transcribe;
     const tmi = $("transcription_model");
     if (tmi) tmi.value = cfg.llm.transcription_model || "";
+    const gwEl = $("gateway_text");
+    if (gwEl) gwEl.checked = !!cfg.llm.gateway_text;
     syncLowLatency(cfg.llm.segment_ms || 0);
 
     // Defensive: if the config's mode isn't among the options
@@ -810,11 +854,16 @@
       endpointInput.value = hintData.endpointDefault;
     }
 
-    // 实时字幕模式只对 OpenAI 兼容通道（GLM / OpenAI / 其它在线 / 本地）有意义。
-    const openaiLike = providerType === "glm" || providerType === "online" || providerType === "local";
+    // 实时字幕模式只对 OpenAI 兼容通道（GLM / OpenAI / 其它在线 / 本地）有意义；
+    // FunASR 自带本地 VAD/断句，无需这些选项。
+    const isFunasr = providerType === "funasr";
+    const openaiLike = !isFunasr && (providerType === "glm" || providerType === "online" || providerType === "local");
     const trRow = $("transcribe_row");
     if (trRow) trRow.style.display = openaiLike ? "" : "none";
     syncTranscribeRows($("transcribe") ? $("transcribe").checked : false);
+    // 本机网关模式只对「本机部署 API（local）」有意义。
+    const gwRow = $("gateway_row");
+    if (gwRow) gwRow.style.display = providerType === "local" ? "" : "none";
   }
 
   function collectPatch() {
@@ -836,6 +885,8 @@
         // 实时字幕模式（GLM / OpenAI 等 OpenAI 兼容通道）：只显示说话人语音转写。
         transcribe: !!($("transcribe") && $("transcribe").checked),
         transcription_model: (($("transcription_model") || {}).value || "").trim(),
+        // 本机网关模式（local 通道）：网关返回的 response.text 直接当字幕。
+        gateway_text: !!($("gateway_text") && $("gateway_text").checked),
       },
       audio: {
         mode: $("audio-mode").value,
@@ -1020,6 +1071,29 @@
   if (lowLatCb) lowLatCb.addEventListener("change", () => syncLowLatencyRows(lowLatCb.checked));
   const trCb = $("transcribe");
   if (trCb) trCb.addEventListener("change", () => syncTranscribeRows(trCb.checked));
+
+  // 模型适配说明弹窗。
+  const guideBtn = $("model-guide-btn");
+  const guideModal = $("guide-modal");
+  if (guideBtn && guideModal) {
+    const openGuide = () => { guideModal.hidden = false; };
+    const closeGuide = () => { guideModal.hidden = true; };
+    guideBtn.addEventListener("click", openGuide);
+    const closeBtn = $("guide-close");
+    if (closeBtn) closeBtn.addEventListener("click", closeGuide);
+    guideModal.addEventListener("click", (e) => {
+      if (e.target === guideModal) closeGuide();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !guideModal.hidden) closeGuide();
+    });
+  }
+
+  // 支持本项目（占位按钮，暂不挂任何链接）。
+  const supportBtn = $("support-btn");
+  if (supportBtn) {
+    supportBtn.addEventListener("click", () => toast(t("support.coming")));
+  }
   $("ov-bg-opacity").addEventListener("input", (e) => {
     $("ov-opacity-display").textContent = e.target.value + "%";
   });

@@ -31,12 +31,14 @@
     <section class="card">
       <h2 data-i18n="sec.llm">1. 大模型</h2>
       <p class="hint" data-i18n="llm.hint">填入你自己的大模型 API Key。所有内容只在本地保存。</p>
+      <button id="model-guide-btn" class="ghost guide-btn" data-i18n="guide.open">模型适配说明</button>
       <label><span data-i18n="llm.provider">API 服务</span>
         <select id="provider-type">
           <option value="qwen" data-i18n="llm.provider.qwen">通义 Qwen API（推荐）</option>
           <option value="glm" data-i18n="llm.provider.glm">智谱 GLM-Realtime</option>
           <option value="online" data-i18n="llm.provider.online">OpenAI / 其它在线 API</option>
           <option value="local" data-i18n="llm.provider.local">本机部署 API（Ollama / LocalAI 等）</option>
+          <option value="funasr" data-i18n="llm.provider.funasr">FunASR 本地流式识别（自部署）</option>
           <option value="mock" data-i18n="llm.provider.mock">模拟模式（不消耗额度）</option>
         </select>
       </label>
@@ -81,6 +83,10 @@
         <span data-i18n="llm.transcribe.model">转写子模型</span>
         <input id="transcription_model" type="text" placeholder="gpt-4o-mini-transcribe" />
         <span class="hint" data-i18n="llm.transcribe.model.hint">留空自动（OpenAI 默认 gpt-4o-mini-transcribe；GLM 通常不用填）</span>
+      </label>
+      <label class="row" id="gateway_row" style="display:none">
+        <input id="gateway_text" type="checkbox" />
+        <span data-i18n="llm.gateway">本机网关模式：网关返回的文字（response.text）直接当字幕。适用于 huggingface/speech-to-speech 这类“本地 OpenAI Realtime 兼容”网关</span>
       </label>
       <label class="row">
         <input id="low_latency" type="checkbox" />
@@ -230,8 +236,21 @@
     </section>
   </main>
 
-  <script src="/admin-assets/app.js?v=0.0.25"></script>
+  <div id="guide-modal" class="guide-modal" hidden>
+    <div class="guide-box">
+      <div class="guide-head">
+        <h3 data-i18n="guide.title">模型适配说明</h3>
+        <button id="guide-close" class="ghost guide-close" data-i18n="guide.close">关闭</button>
+      </div>
+      <div class="guide-body" data-i18n-html="guide.body"></div>
+    </div>
+  </div>
+
+  <script src="/admin-assets/app.js?v=0.0.30"></script>
   <div id="toast" class="toast" hidden></div>
-  <footer class="footer" data-i18n="footer">本插件由不息传播制作</footer>
+  <footer class="footer">
+    <span data-i18n="footer">本插件由不息传播制作</span>
+    <button id="support-btn" class="footer-support" data-i18n="support.btn">支持本项目</button>
+  </footer>
 </body>
 </html>

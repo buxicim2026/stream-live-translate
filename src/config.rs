@@ -63,6 +63,13 @@ pub struct LlmConfig {
     /// OpenAI 官方端点默认 gpt-4o-mini-transcribe；其它厂商按会话主模型尝试。
     #[serde(default)]
     pub transcription_model: String,
+    /// 本机网关模式（OpenAI 兼容 local 通道）：网关把「要显示的字幕文字」
+    /// 直接经 response.text.* 返回（如 huggingface/speech-to-speech 这类本地
+    /// OpenAI Realtime 兼容网关）。开启后不再等待 input_audio_transcription
+    /// 事件，把网关回的文字当作字幕显示；配合低延迟分段时，提交后会自动补发
+    /// response.create 触发网关出结果。
+    #[serde(default)]
+    pub gateway_text: bool,
 }
 
 fn default_ingest_port() -> u16 {
@@ -196,6 +203,7 @@ impl Default for Config {
                 segment_ms: 0,
                 transcribe: false,
                 transcription_model: String::new(),
+                gateway_text: false,
             },
             audio: AudioConfig {
                 mode: "system".into(),

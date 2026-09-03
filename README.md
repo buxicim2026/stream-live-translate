@@ -19,6 +19,16 @@
 | API Key 本地保存 | 配置只存在本地 `config.toml`，不联网回传 |
 | 独立运行模式 | 不用 OBS 插件也能单独跑，系统音频环回模式保留（见 docs/USAGE.md） |
 
+## 模型兼容性
+
+插件需要能**实时接收流式音频、并边听边返回字幕文字**的语音（多模态）Realtime 模型。
+
+**可用**：通义 Qwen Realtime 语音（同传 / ASR / Qwen-Audio）、智谱 GLM-Realtime、OpenAI Realtime、FunASR 本地流式识别，以及 OpenAI 兼容的本地 Realtime 网关（如 huggingface/speech-to-speech）。
+
+**不可用**：纯文本 / 纯视觉模型、纯语音合成（TTS）、非实时流式接口——它们无法“听”实时音频，即使能连上也不会有字幕。
+
+配置时可参考 admin 面板右上“模型适配说明”（弹窗）与各厂商的下拉提示。
+
 ## 系统要求
 
 | 平台 | 最低版本 | 系统依赖 |
