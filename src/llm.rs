@@ -224,6 +224,11 @@ pub mod qwen {
             //     ~1–2 秒（代价：长句被切成短段）。静音超 ~400ms 也 commit
             //     一次收尾，避免句子结尾空等。
             let segment_ms = self.cfg.segment_ms;
+            // 同传翻译通道（livetranslate）：译文由模型的 response 产出，强制分段
+            // 提交后需要显式 response.create 才会生成结果（否则服务端只在自己判定
+            // 「一句话说完」时才产出，低延迟就失效了）。
+            // ASR/转写通道则由服务端在 commit 时自动出识别结果，不需要触发模型回复。
+            let translation_channel = !asr_mode;
             let write = async move {
                 let commit_enabled = segment_ms > 0;
                 let mut voiced_ms: u64 = 0; // 自上次 commit 起累计的有声时长(ms)
@@ -265,6 +270,16 @@ pub mod qwen {
                             {
                                 break;
                             }
+                            if translation_channel {
+                                let rc = serde_json::json!({ "type": "response.create" });
+                                if write_half
+                                    .send(Message::Text(rc.to_string().into()))
+                                    .await
+                                    .is_err()
+                                {
+                                    break;
+                                }
+                            }
                             voiced_ms = 0;
                             tail_ms = 0;
                         }
@@ -280,6 +295,16 @@ pub mod qwen {
                             {
                                 break;
                             }
+                            if translation_channel {
+                                let rc = serde_json::json!({ "type": "response.create" });
+                                if write_half
+                                    .send(Message::Text(rc.to_string().into()))
+                                    .await
+                                    .is_err()
+                                {
+                                    break;
+                                }
+                            }
                             voiced_ms = 0;
                             tail_ms = 0;
                             has_voiced = false;
@@ -292,6 +317,12 @@ pub mod qwen {
                     let _ = write_half
                         .send(Message::Text(cm.to_string().into()))
                         .await;
+                    if translation_channel {
+                        let rc = serde_json::json!({ "type": "response.create" });
+                        let _ = write_half
+                            .send(Message::Text(rc.to_string().into()))
+                            .await;
+                    }
                 }
                 // Flush the tail of the session, then close gracefully.
                 let _ = write_half
@@ -610,16 +641,11 @@ pub mod openai {
                                             sink.push(SubtitleEvent::Final(d.to_string()));
                                         }
                                     }
-                                    // 字幕模式：忽略模型自己的回复文本，只显示说话人转写。
-                                    "response.text.delta" if !transcribe_mode => {
-                                        if let Some(d) = v.get("delta").and_then(|s| s.as_str()) {
-                                            sink.push(SubtitleEvent::Partial(d.to_string()));
-                                        }
-                                    }
-                                    "response.text.done" if !transcribe_mode => {
-                                        if let Some(d) = v.get("text").and_then(|s| s.as_str()) {
-                                            sink.push(SubtitleEvent::Final(d.to_string()));
-                                        }
+                                    // 只显示「说话人的转写」（input_audio_transcription.*）。
+                                    // response.text.* 是模型自己的回复（AI 自言自语），
+                                    // 不是讲述人讲的话，一律不作为字幕显示。
+                                    "response.text.delta" | "response.text.done" => {
+                                        debug!(payload=%t, "ignored assistant text (not speaker speech)");
                                     }
                                     "error" => {
                                         warn!(payload=%t, "openai error event");
@@ -633,23 +659,14 @@ pub mod openai {
             };
 
             let write = async move {
-                // 分段 commit（低延迟/网关模式用）。网关模式下提交后还要补发
-                // response.create，否则很多 OpenAI 兼容服务不会真正产出文本。
+                // 分段 commit（低延迟用）。只提交音频缓冲区：字幕走的是「说话人转写」
+                // 通道，不发送 response.create —— 那会触发模型生成 AI 回复，
+                // 字幕就会变成 AI 的自言自语。
                 macro_rules! do_commit {
                     () => {{
                         let c = serde_json::json!({ "type": "input_audio_buffer.commit" });
                         if write_half.send(Message::Text(c.to_string().into())).await.is_err() {
                             break;
-                        }
-                        if gateway_text {
-                            let cr = serde_json::json!({ "type": "response.create" });
-                            if write_half
-                                .send(Message::Text(cr.to_string().into()))
-                                .await
-                                .is_err()
-                            {
-                                break;
-                            }
                         }
                     }};
                 }
@@ -696,14 +713,10 @@ pub mod openai {
                         }
                     }
                 }
-                // 会话结束前把尾巴交出去（网关模式下补 response.create 让结果出来）。
+                // 会话结束前把尾巴交出去。
                 if commit_enabled && (has_voiced || voiced_ms > 0) {
                     let c = serde_json::json!({ "type": "input_audio_buffer.commit" });
                     let _ = write_half.send(Message::Text(c.to_string().into())).await;
-                    if gateway_text {
-                        let cr = serde_json::json!({ "type": "response.create" });
-                        let _ = write_half.send(Message::Text(cr.to_string().into())).await;
-                    }
                 }
             };
 

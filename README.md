@@ -23,11 +23,48 @@
 
 插件需要能**实时接收流式音频、并边听边返回字幕文字**的语音（多模态）Realtime 模型。
 
-**可用**：通义 Qwen Realtime 语音（同传 / ASR / Qwen-Audio）、智谱 GLM-Realtime、OpenAI Realtime、FunASR 本地流式识别，以及 OpenAI 兼容的本地 Realtime 网关（如 huggingface/speech-to-speech）。
+**云端可用**：通义 Qwen Realtime 语音（同传 / ASR / Qwen-Audio）、智谱 GLM-Realtime、OpenAI Realtime。
 
-**不可用**：纯文本 / 纯视觉模型、纯语音合成（TTS）、非实时流式接口——它们无法“听”实时音频，即使能连上也不会有字幕。
+**本地 / 自部署可用**：FunASR 流式识别、huggingface/speech-to-speech 网关，以及套了 Realtime 网关的其它 ASR（见下方命令）。
+
+**不可用**：纯文本 / 纯视觉模型、纯语音合成（TTS）、HTTP 上传式 ASR（非实时）——它们无法“听”实时音频，即使能连上也不会有字幕。
 
 配置时可参考 admin 面板右上“模型适配说明”（弹窗）与各厂商的下拉提示。
+
+### 本地部署与推荐命令
+
+通用公式：**本地字幕 = 一个能流式出字的 ASR（Whisper / Parakeet / SenseVoice…）+ 一个 OpenAI-Realtime 兼容网关 + 插件「本机部署 API」连上**。换模型只改网关里的 STT 后端，插件侧无需改动。
+
+**1) FunASR 流式识别（插件内置通道，中文 / 粤语强，推荐）**
+
+按 FunASR 官方 runtime 文档起 Docker（镜像名以官方文档为准，默认端口 `10095`）：
+
+```bash
+docker run -itd --name funasr -p 10095:10095 <funasr-runtime 官方镜像>
+```
+
+插件侧：API 服务选「FunASR 本地流式识别（自部署）」，端点默认 `ws://127.0.0.1:10095`。
+
+**2) huggingface/speech-to-speech（OpenAI Realtime 兼容网关，Linux + NVIDIA / Apple Silicon）**
+
+```bash
+pip install -U "speech-to-speech"
+speech-to-speech serve --host 0.0.0.0 --stt parakeet-tdt --enable_live_transcription
+```
+
+- 端点：`ws://<主机IP>:8765/v1/realtime`；插件侧 API 服务选「本机部署 API」，并在「实时字幕模式」和「本机网关模式」之间二选一勾选。
+- **如果勾「实时字幕模式」出现会话报错**：该模式会向服务端下发 `input_audio_transcription` 配置，部分网关不接受。**改勾「本机网关模式」即可**（它不下发该配置）。两者现在都只读取「说话人转写」事件、都不会触发 AI 回复，字幕效果一致。
+- 只做字幕时不会触发 AI 回复（插件不发送 `response.create`），LLM / TTS 不会被调用，字幕是讲述人原话而非 AI 自言自语。
+- 换 STT 后端：`--stt faster-whisper`（需 `pip install "speech-to-speech[faster-whisper]"`）等。
+
+**3) 其它 ASR（faster-whisper / whisper.cpp / Parakeet-TDT / SenseVoice）**
+
+需自行套一个 Realtime 网关（可复用上面的 speech-to-speech，把 `--stt` 换成对应后端）。
+
+### 关于延迟
+
+- 中文直播只要中文字幕 → 用 **ASR 模型**（云端 `qwen3-asr-flash-realtime` 或本地 FunASR），有流式 partial，延迟可到 ~1 秒。
+- 同传翻译模型（`qwen3.5-livetranslate-flash-realtime`）按整句返回，延迟 ≈ 整句话时长；如需更快可勾选 admin 的「低延迟模式」按段推进（代价：长句被切成短段）。
 
 ## 系统要求
 
