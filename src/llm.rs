@@ -149,13 +149,24 @@ pub mod qwen {
             // Both use server VAD: the server detects speech end itself
             // and auto-commits, so we feed it a *continuous* audio stream.
             let asr_mode = !self.cfg.model.to_lowercase().contains("livetranslate");
+            let segment_ms = self.cfg.segment_ms;
+            // 低延迟模式（segment_ms > 0）= 手动模式：关掉服务端 VAD，由本机按段提交。
+            // 服务端 VAD 开着的时候，它只按自己的判定提交（即“等一句话说完才出结果”），
+            // 客户端发的 commit 会被忽略，低延迟就失效了；官方 manual 模式下
+            // 客户端 commit() 才会触发识别 / 翻译。
+            let manual_mode = segment_ms > 0;
+            let turn_detection = if manual_mode {
+                serde_json::Value::Null
+            } else {
+                serde_json::json!({ "type": "server_vad" })
+            };
             let session_cfg: serde_json::Value = if asr_mode {
                 serde_json::json!({
                     "modalities": ["text"],
                     "sample_rate": 16000,
                     "input_audio_format": "pcm",
                     "input_audio_transcription": { "model": self.cfg.model },
-                    "turn_detection": { "type": "server_vad" }
+                    "turn_detection": turn_detection
                 })
             } else {
                 serde_json::json!({
@@ -163,7 +174,7 @@ pub mod qwen {
                     "sample_rate": 16000,
                     "input_audio_format": "pcm",
                     "input_audio_transcription": null,
-                    "turn_detection": { "type": "server_vad" },
+                    "turn_detection": turn_detection.clone(),
                     "translation": { "language": self.cfg.target_lang }
                 })
             };
@@ -218,27 +229,49 @@ pub mod qwen {
             //   * segment_ms == 0（默认）：只 append。服务端 server_vad 在
             //     「一句话说完、静音达标」后自行 commit，整句返回 —— 句子最
             //     完整，但字幕要等整句话说完（延迟≈整句话时长）。
-            //   * segment_ms > 0（低延迟模式）：本机累计「正在说的语音」，
-            //     每满该毫秒就主动发一次 input_audio_buffer.commit，把当前
-            //     已说的这一小段提前识别/翻译出来，字幕按段推进，延迟可压到
-            //     ~1–2 秒（代价：长句被切成短段）。静音超 ~400ms 也 commit
-            //     一次收尾，避免句子结尾空等。
-            let segment_ms = self.cfg.segment_ms;
-            // 同传翻译通道（livetranslate）：译文由模型的 response 产出，强制分段
-            // 提交后需要显式 response.create 才会生成结果（否则服务端只在自己判定
-            // 「一句话说完」时才产出，低延迟就失效了）。
-            // ASR/转写通道则由服务端在 commit 时自动出识别结果，不需要触发模型回复。
+            //   * segment_ms > 0（低延迟模式）：切到手动模式（会话里关掉服务端
+            //     VAD），本机按段收集「正在说的语音」并 input_audio_buffer.commit，
+            //     由客户端 commit 触发识别/翻译，字幕按段推进。
+            //     手动模式下**只把说话的音频**放进缓冲区：段与段之间的静音不塞
+            //     进去，否则下次提交会变成一大段空白音频（延迟暴涨、还容易幻觉）。
+            //
+            // 手动模式下两个通道的差别：
+            //   * ASR/转写通道：commit 即出识别结果，不需要触发模型生成；
+            //   * 同传翻译通道：译文属于模型的 response，提交后补一个
+            //     response.create 确保产出（若服务端已自动产出，overlay 的
+            //     重复句检测会兜掉多余的一句）。
             let translation_channel = !asr_mode;
             let write = async move {
                 let commit_enabled = segment_ms > 0;
-                let mut voiced_ms: u64 = 0; // 自上次 commit 起累计的有声时长(ms)
-                let mut tail_ms: u64 = 0; // 有声结束后跟随的静音时长(ms)
-                let mut has_voiced = false; // 上次 commit 后是否出现过语音
+                let mut voiced_ms: u64 = 0; // 当前这段里已累计的有声时长(ms)
+                let mut tail_ms: u64 = 0; // 有声之后跟随的静音时长(ms)
+                let mut in_segment = false; // 是否正在收集一段语音（手动模式用）
 
                 while let Some(chunk) = audio_rx.recv().await {
                     if chunk.is_empty() {
                         continue;
                     }
+                    let ms = (chunk.len() as u64) * 1000 / 16_000;
+                    let voiced = crate::vad::rms(&chunk) >= 0.008;
+
+                    if commit_enabled {
+                        if voiced {
+                            if !in_segment {
+                                in_segment = true;
+                                voiced_ms = 0;
+                                tail_ms = 0;
+                            }
+                            voiced_ms = voiced_ms.saturating_add(ms);
+                            tail_ms = 0;
+                        } else if in_segment {
+                            tail_ms = tail_ms.saturating_add(ms);
+                        }
+                        // 非说话期间（两段之间）不往缓冲区里塞音频。
+                        if !in_segment {
+                            continue;
+                        }
+                    }
+
                     let mut bytes = Vec::with_capacity(chunk.len() * 2);
                     for s in &chunk {
                         bytes.extend_from_slice(&s.to_le_bytes());
@@ -255,64 +288,55 @@ pub mod qwen {
                         continue;
                     }
 
-                    let ms = (chunk.len() as u64) * 1000 / 16_000;
-                    if crate::vad::rms(&chunk) >= 0.008 {
-                        // 语音：累计到 segment_ms 就提前 commit 一小段。
-                        voiced_ms = voiced_ms.saturating_add(ms);
-                        has_voiced = true;
+                    if voiced && voiced_ms >= segment_ms {
+                        // 说满一段就提交（人还在说，段内继续累计下一段）。
+                        let cm = serde_json::json!({ "type": "input_audio_buffer.commit" });
+                        if write_half
+                            .send(Message::Text(cm.to_string().into()))
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                        if translation_channel {
+                            let rc = serde_json::json!({ "type": "response.create" });
+                            if write_half
+                                .send(Message::Text(rc.to_string().into()))
+                                .await
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
+                        voiced_ms = 0;
                         tail_ms = 0;
-                        if voiced_ms >= segment_ms {
-                            let cm = serde_json::json!({ "type": "input_audio_buffer.commit" });
+                    } else if tail_ms >= 400 {
+                        // 说完（尾静音够长）收尾提交这段，然后停止收集等下一段。
+                        let cm = serde_json::json!({ "type": "input_audio_buffer.commit" });
+                        if write_half
+                            .send(Message::Text(cm.to_string().into()))
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                        if translation_channel {
+                            let rc = serde_json::json!({ "type": "response.create" });
                             if write_half
-                                .send(Message::Text(cm.to_string().into()))
+                                .send(Message::Text(rc.to_string().into()))
                                 .await
                                 .is_err()
                             {
                                 break;
                             }
-                            if translation_channel {
-                                let rc = serde_json::json!({ "type": "response.create" });
-                                if write_half
-                                    .send(Message::Text(rc.to_string().into()))
-                                    .await
-                                    .is_err()
-                                {
-                                    break;
-                                }
-                            }
-                            voiced_ms = 0;
-                            tail_ms = 0;
                         }
-                    } else if has_voiced {
-                        // 语音结束后的尾静音：够长就收尾提交，别让结尾空等。
-                        tail_ms = tail_ms.saturating_add(ms);
-                        if tail_ms >= 400 {
-                            let cm = serde_json::json!({ "type": "input_audio_buffer.commit" });
-                            if write_half
-                                .send(Message::Text(cm.to_string().into()))
-                                .await
-                                .is_err()
-                            {
-                                break;
-                            }
-                            if translation_channel {
-                                let rc = serde_json::json!({ "type": "response.create" });
-                                if write_half
-                                    .send(Message::Text(rc.to_string().into()))
-                                    .await
-                                    .is_err()
-                                {
-                                    break;
-                                }
-                            }
-                            voiced_ms = 0;
-                            tail_ms = 0;
-                            has_voiced = false;
-                        }
+                        voiced_ms = 0;
+                        tail_ms = 0;
+                        in_segment = false;
                     }
                 }
                 // 会话结束前把没提交完的尾巴交出去。
-                if commit_enabled && (has_voiced || voiced_ms > 0) {
+                if commit_enabled && in_segment {
                     let cm = serde_json::json!({ "type": "input_audio_buffer.commit" });
                     let _ = write_half
                         .send(Message::Text(cm.to_string().into()))
@@ -594,6 +618,11 @@ pub mod openai {
             if let Some(prompt) = self.cfg.system_prompt.as_deref().filter(|p| !p.trim().is_empty()) {
                 session_cfg["instructions"] = serde_json::Value::String(prompt.to_string());
             }
+            // 低延迟模式 = 手动模式：关掉服务端 VAD，改由本机按段 commit 触发识别。
+            // 否则服务端只按自己的判定提交（等一句话说完），客户端 commit 会被忽略。
+            if self.cfg.segment_ms > 0 {
+                session_cfg["turn_detection"] = serde_json::Value::Null;
+            }
             // 实时字幕模式：开启「用户语音转写」通道（OpenAI / GLM 等 OpenAI
             // 兼容 realtime）。OpenAI 官方端点默认用 gpt-4o-mini-transcribe；
             // 其它厂商（如 GLM）没有明确子模型名时先用会话主模型名试探。
@@ -672,11 +701,32 @@ pub mod openai {
                 }
 
                 let commit_enabled = segment_ms > 0;
-                let mut voiced_ms: u64 = 0; // 自上次 commit 起的有声时长(ms)
-                let mut tail_ms: u64 = 0; // 有声结束后跟随的静音时长(ms)
-                let mut has_voiced = false;
+                let mut voiced_ms: u64 = 0; // 当前这段里已累计的有声时长(ms)
+                let mut tail_ms: u64 = 0; // 有声之后跟随的静音时长(ms)
+                let mut in_segment = false; // 是否正在收集一段语音（手动模式用）
 
                 while let Some(chunk) = audio_rx.recv().await {
+                    let ms = (chunk.len() as u64) * 1000 / 16_000;
+                    let voiced = crate::vad::rms(&chunk) >= 0.008;
+
+                    if commit_enabled {
+                        if voiced {
+                            if !in_segment {
+                                in_segment = true;
+                                voiced_ms = 0;
+                                tail_ms = 0;
+                            }
+                            voiced_ms = voiced_ms.saturating_add(ms);
+                            tail_ms = 0;
+                        } else if in_segment {
+                            tail_ms = tail_ms.saturating_add(ms);
+                        }
+                        // 非说话期间（两段之间）不往缓冲区里塞音频。
+                        if !in_segment {
+                            continue;
+                        }
+                    }
+
                     let mut bytes = Vec::with_capacity(chunk.len() * 2);
                     for s in &chunk {
                         bytes.extend_from_slice(&s.to_le_bytes());
@@ -693,28 +743,19 @@ pub mod openai {
                         continue;
                     }
 
-                    let ms = (chunk.len() as u64) * 1000 / 16_000;
-                    if crate::vad::rms(&chunk) >= 0.008 {
-                        voiced_ms = voiced_ms.saturating_add(ms);
-                        has_voiced = true;
+                    if voiced && voiced_ms >= segment_ms {
+                        do_commit!();
+                        voiced_ms = 0;
                         tail_ms = 0;
-                        if voiced_ms >= segment_ms {
-                            do_commit!();
-                            voiced_ms = 0;
-                            tail_ms = 0;
-                        }
-                    } else if has_voiced {
-                        tail_ms = tail_ms.saturating_add(ms);
-                        if tail_ms >= 400 {
-                            do_commit!();
-                            voiced_ms = 0;
-                            tail_ms = 0;
-                            has_voiced = false;
-                        }
+                    } else if tail_ms >= 400 {
+                        do_commit!();
+                        voiced_ms = 0;
+                        tail_ms = 0;
+                        in_segment = false;
                     }
                 }
                 // 会话结束前把尾巴交出去。
-                if commit_enabled && (has_voiced || voiced_ms > 0) {
+                if commit_enabled && in_segment {
                     let c = serde_json::json!({ "type": "input_audio_buffer.commit" });
                     let _ = write_half.send(Message::Text(c.to_string().into())).await;
                 }

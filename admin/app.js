@@ -64,7 +64,7 @@
       "support.coming": "该入口暂未开放，敬请期待。",
       "llm.lowlat": "低延迟模式：不等一句话说完，字幕边说边出",
       "llm.lowlat.ms": "分段时长",
-      "llm.lowlat.hint": "开启后每段约 1–1.5 秒即出，适合实时同传；延迟低但长句会被切短。中文直播只要中文字幕时，建议把模型换成 qwen3-asr-flash-realtime（ASR）效果最佳。",
+      "llm.lowlat.hint": "开启后关闭服务端 VAD，改由本机按段提交音频：字幕每约 0.8–1.6 秒更新一段（分段时长可选），实现边说边出；代价是长句被切成短段。中文直播只要中文字幕时，配合 qwen3-asr-flash-realtime（ASR）或本地 FunASR 效果最佳。",
 
       "lang.zh": "中文",
       "lang.en": "英语",
@@ -192,7 +192,7 @@
       "support.coming": "Not available yet — stay tuned.",
       "llm.lowlat": "Low-latency mode: show subtitles while speaking, no need to wait for a full sentence",
       "llm.lowlat.ms": "Segment length",
-      "llm.lowlat.hint": "When on, a subtitle segment appears every ~1–1.5s — great for live interpretation; latency is low but long sentences get split. For Chinese livestreams that only need Chinese captions, switch the model to qwen3-asr-flash-realtime (ASR) for best results.",
+      "llm.lowlat.hint": "When on, server-side VAD is disabled and this machine commits audio per segment: a subtitle segment appears every ~0.8–1.6s (selectable), so captions show while speaking; long sentences get split. For Chinese livestreams that only need Chinese captions, pair it with qwen3-asr-flash-realtime (ASR) or local FunASR.",
 
       "lang.zh": "Chinese",
       "lang.en": "English",
