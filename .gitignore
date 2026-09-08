@@ -19,6 +19,9 @@ config.toml
 .DS_Store
 Thumbs.db
 
+# IDE state (do not track)
+/.codebuddy/
+
 # OS-specific junk
 *.swp
 *~

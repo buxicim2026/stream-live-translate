@@ -4,209 +4,216 @@
   <meta charset="utf-8" />
   <title>Stream Live Translate · 控制台</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <link rel="stylesheet" href="/admin-assets/style.css?v=0.0.25" />
+  <link rel="stylesheet" href="/admin-assets/style.css?v=0.1.0" />
 </head>
 <body>
   <header class="topbar">
     <div class="brand">
       <span class="logo">●</span>
-      <span>Stream Live Translate</span>
+      <span class="brand-name">Stream Live Translate</span>
     </div>
-    <button id="perf-mode-btn" class="perf-btn" type="button"
-            data-i18n="perf.btn"
-            data-i18n-title="perf.title"
-            title="关闭液态玻璃特效（极光动画、毛玻璃模糊、高光扫动），降低集显占用">
-      切换到性能模式
-    </button>
     <div class="status-strip" id="status-strip">
-      <span class="dot" id="dot-audio"></span><span data-i18n="status.audio">音频</span>
-      <span class="dot" id="dot-llm"></span><span data-i18n="status.llm">大模型</span>
-      <span class="dot" id="dot-obs"></span><span data-i18n="status.obs">OBS</span>
+      <span class="dot" id="dot-audio" title="音频输入"></span><span class="lbl">音频</span>
+      <span class="dot" id="dot-llm" title="大模型"></span><span class="lbl">大模型</span>
+      <span class="dot" id="dot-obs" title="OBS"></span><span class="lbl">OBS</span>
       <span class="sep">·</span>
-      <span id="run-state" class="run-state idle" data-i18n="status.checking">检测中…</span>
+      <span id="ws-state" class="ws-state" title="WebSocket 连接状态">WS 检测中…</span>
+      <span class="sep">·</span>
+      <span id="run-state" class="run-state idle">检测中…</span>
     </div>
   </header>
 
   <main class="grid">
     <section class="card">
-      <h2 data-i18n="sec.llm">1. 大模型</h2>
-      <p class="hint" data-i18n="llm.hint">填入你自己的大模型 API Key。所有内容只在本地保存。</p>
-      <button id="model-guide-btn" class="ghost guide-btn" data-i18n="guide.open">模型适配说明</button>
-      <label><span data-i18n="llm.provider">API 服务</span>
+      <h2>1. 大模型</h2>
+      <p class="hint">填入你自己的大模型 API Key。所有内容只在本地保存。</p>
+      <button id="model-guide-btn" class="btn ghost guide-btn" type="button">模型适配说明</button>
+
+      <label>
+        <span>API 服务</span>
         <select id="provider-type">
-          <option value="qwen" data-i18n="llm.provider.qwen">通义 Qwen API（推荐）</option>
-          <option value="glm" data-i18n="llm.provider.glm">智谱 GLM-Realtime</option>
-          <option value="online" data-i18n="llm.provider.online">OpenAI / 其它在线 API</option>
-          <option value="local" data-i18n="llm.provider.local">本机部署 API（Ollama / LocalAI 等）</option>
-          <option value="funasr" data-i18n="llm.provider.funasr">FunASR 本地流式识别（自部署）</option>
-          <option value="mock" data-i18n="llm.provider.mock">模拟模式（不消耗额度）</option>
+          <option value="qwen">通义 Qwen API（推荐）</option>
+          <option value="glm">智谱 GLM-Realtime</option>
+          <option value="online">OpenAI / 其它在线 API</option>
+          <option value="local">本机部署 API（Ollama / LocalAI 等）</option>
+          <option value="funasr">FunASR 本地流式识别（自部署）</option>
+          <option value="mock">模拟模式（不消耗额度）</option>
         </select>
       </label>
-      <div id="provider-hint-box" class="provider-hint-box">
-        <strong>💡 通义 Qwen API</strong><br />
-        只能用 qwen3 系列语音（多模态）Realtime 实时模型；不能用非语音、非实时模型运行。
-      </div>
-      <label><span data-i18n="llm.model">Model（模型名称）</span>
+      <div id="provider-hint-box" class="provider-hint-box">提示加载中…</div>
+
+      <label>
+        <span>Model（模型名称）</span>
         <input id="model" type="text" list="model-presets" placeholder="qwen3.5-livetranslate-flash-realtime" />
-        <datalist id="model-presets">
-          <option value="qwen3.5-livetranslate-flash-realtime">同传翻译（推荐，多语言→目标语言）</option>
-          <option value="qwen3-asr-flash-realtime">实时语音识别（ASR）</option>
-          <option value="qwen-audio-3.0-realtime-flash">Qwen-Audio 3.0 实时（语音对话）</option>
-          <option value="qwen-audio-realtime-plus">Qwen-Audio Realtime Plus（语音对话）</option>
-        </datalist>
+        <datalist id="model-presets"></datalist>
       </label>
-      <label><span data-i18n="llm.apikey">API Key</span>
+
+      <label>
+        <span>API Key</span>
         <input id="api_key" type="password" placeholder="sk-..." />
       </label>
-      <label><span data-i18n="llm.baseurl">Base URL（接口地址）</span>
-        <input id="endpoint" type="text" data-i18n-ph="llm.baseurl.ph" placeholder="留空使用内置默认地址" />
+
+      <label>
+        <span>Base URL（接口地址，留空用默认）</span>
+        <input id="endpoint" type="text" placeholder="留空使用内置默认地址" />
       </label>
-      <label><span data-i18n="llm.target">翻译目标语言</span>
+
+      <label>
+        <span>翻译目标语言</span>
         <select id="target_lang">
-          <option value="zh" data-i18n="lang.zh">中文</option>
-          <option value="en" data-i18n="lang.en">英语</option>
-          <option value="fr" data-i18n="lang.fr">法语</option>
-          <option value="ja" data-i18n="lang.ja">日语</option>
-          <option value="ko" data-i18n="lang.ko">韩语</option>
-          <option value="es" data-i18n="lang.es">西班牙语</option>
+          <option value="zh">中文</option>
+          <option value="en">英语</option>
+          <option value="fr">法语</option>
+          <option value="ja">日语</option>
+          <option value="ko">韩语</option>
+          <option value="es">西班牙语</option>
         </select>
       </label>
+
       <label class="row">
         <input id="translate_chinese" type="checkbox" />
-        <span data-i18n="llm.translate_zh">对中文也调用翻译（默认否，节省 token）</span>
+        <span>对中文也调用翻译（默认否，节省 token）</span>
       </label>
+
       <label class="row" id="transcribe_row">
         <input id="transcribe" type="checkbox" />
-        <span data-i18n="llm.transcribe">实时字幕模式：只显示“说话人的语音转写”，忽略模型自己的回复（GLM / OpenAI 语音对话模型用）</span>
+        <span>实时字幕模式：只显示说话人的语音转写</span>
       </label>
+
       <label id="transcription_model_row" class="row" style="display:none">
-        <span data-i18n="llm.transcribe.model">转写子模型</span>
+        <span>转写子模型</span>
         <input id="transcription_model" type="text" placeholder="gpt-4o-mini-transcribe" />
-        <span class="hint" data-i18n="llm.transcribe.model.hint">留空自动（OpenAI 默认 gpt-4o-mini-transcribe；GLM 通常不用填）</span>
       </label>
+
       <label class="row" id="gateway_row" style="display:none">
         <input id="gateway_text" type="checkbox" />
-        <span data-i18n="llm.gateway">本机网关模式：网关返回的文字（response.text）直接当字幕。适用于 huggingface/speech-to-speech 这类“本地 OpenAI Realtime 兼容”网关</span>
+        <span>本机网关模式（response.text 直接当字幕）</span>
       </label>
+
       <label class="row">
         <input id="low_latency" type="checkbox" />
-        <span data-i18n="llm.lowlat">低延迟模式：不等一句话说完，字幕边说边出</span>
+        <span>低延迟模式：边说边出字幕</span>
       </label>
       <label id="low_latency_ms_row" class="row" style="display:none">
-        <span data-i18n="llm.lowlat.ms">分段时长</span>
+        <span>分段时长</span>
         <select id="segment_ms">
           <option value="800">0.8 秒</option>
           <option value="1200" selected>1.2 秒</option>
           <option value="1600">1.6 秒</option>
         </select>
       </label>
-      <p class="hint" id="low_latency_hint" style="display:none"
-         data-i18n="llm.lowlat.hint">开启后每段约 1–1.5 秒即出，适合实时同传；延迟低但长句会被切短。中文直播只要中文字幕时，建议把模型换成 qwen3-asr-flash-realtime（ASR）效果最佳。</p>
     </section>
 
     <section class="card">
-      <h2 data-i18n="sec.audio">2. 音频输入</h2>
-      <p class="hint" data-i18n="audio.hint">系统音频环回 = 抓取 OBS 当前听到的声音；麦克风 = 抓指定输入设备。</p>
-      <label><span data-i18n="audio.mode">模式</span>
+      <h2>2. 音频输入</h2>
+      <p class="hint">系统音频环回 = 抓取 OBS 当前听到的声音；麦克风 = 抓指定输入设备。</p>
+      <label>
+        <span>模式</span>
         <select id="audio-mode">
-          <option value="obs_filter" data-i18n="audio.mode.obs">OBS 插件送音（插件模式下自动使用，请勿更改）</option>
-          <option value="system" data-i18n="audio.mode.system">系统音频环回（独立运行时）</option>
-          <option value="device" data-i18n="audio.mode.device">指定输入/输出设备</option>
+          <option value="obs_filter">OBS 插件送音（插件模式下自动使用，请勿更改）</option>
+          <option value="system">系统音频环回（独立运行时）</option>
+          <option value="device">指定输入/输出设备</option>
         </select>
       </label>
-      <p class="hint" id="audio-mode-lock" data-i18n="audio.locked" hidden>🔒 引擎由 OBS 插件启动，音频由插件直接送入，模式已锁定。</p>
-      <label><span data-i18n="audio.device">设备</span>
+      <p class="hint locked" id="audio-mode-lock" hidden>🔒 引擎由 OBS 插件启动，音频由插件直接送入，模式已锁定。</p>
+      <label>
+        <span>设备</span>
         <select id="audio-device"></select>
       </label>
       <label class="row">
         <input id="use_sck" type="checkbox" />
-        <span data-i18n="audio.sck">macOS 使用 ScreenCaptureKit（需要授予"屏幕录制"权限）</span>
+        <span>macOS 使用 ScreenCaptureKit（需要授予"屏幕录制"权限）</span>
       </label>
     </section>
 
     <section class="card">
-      <h2 data-i18n="sec.obs">3. OBS 集成</h2>
-      <p class="hint" data-i18n="obs.hint">插件自动连接本机 OBS（obs-websocket v5），可把字幕同步写入一个"Subtitles"文本源。</p>
+      <h2>3. OBS 集成</h2>
+      <p class="hint">插件自动连接本机 OBS（obs-websocket v5），可把字幕同步写入一个"Subtitles"文本源。</p>
       <label class="row">
         <input id="obs-auto" type="checkbox" />
-        <span data-i18n="obs.auto">启动时自动连接</span>
+        <span>启动时自动连接</span>
       </label>
-      <label><span data-i18n="obs.host">OBS WebSocket 地址</span>
+      <label>
+        <span>OBS WebSocket 地址</span>
         <input id="obs-host" type="text" placeholder="127.0.0.1" />
       </label>
-      <label><span data-i18n="obs.port">OBS 端口</span>
+      <label>
+        <span>OBS 端口</span>
         <input id="obs-port" type="number" value="4455" />
       </label>
-      <label><span data-i18n="obs.password">OBS 密码（如果开启了）</span>
+      <label>
+        <span>OBS 密码（如果开启了）</span>
         <input id="obs-password" type="password" />
       </label>
-      <!-- 拆成可翻译的小段，而不是整段 innerHTML 替换：#obs-dock-url 由
-           JS 写入，被重建后 JS 持有的引用会指向已从文档移除的旧节点。 -->
-      <p class="hint obs-dock-hint">
-        <span data-i18n="obs.dockhint.a">想把控制台钉到 OBS 侧边栏？OBS → 顶部菜单</span>
-        <b data-i18n="obs.dockhint.tools">工具</b>
-        <span data-i18n="obs.dockhint.arrow">→</span>
-        <b data-i18n="obs.dockhint.docks">自定义浏览器停靠面板 (Custom Browser Docks)</b>
-        <span data-i18n="obs.dockhint.then">→ 填入</span>
-        <code id="obs-dock-url"></code>
-        <span data-i18n="obs.dockhint.name">，名称随意。</span>
+      <p class="hint">
+        想把控制台钉到 OBS 侧边栏？OBS → 顶部菜单 <b>工具</b> →
+        <b>自定义浏览器停靠面板 (Custom Browser Docks)</b> → 填入
+        <code id="obs-dock-url">…</code>，名称随意。
       </p>
     </section>
 
     <section class="card">
-      <h2 data-i18n="sec.style">4. 字幕样式</h2>
-      <p class="hint" data-i18n-html="style.hint">保存后 OBS 字幕<b>立即生效</b>，无需重新复制下方 URL。</p>
-      <label><span data-i18n="style.size">字体大小 (px)</span>
+      <h2>4. 字幕样式</h2>
+      <p class="hint">保存后 OBS 字幕<b>立即生效</b>，无需重新复制下方 URL。</p>
+      <label>
+        <span>字体大小 (px)</span>
         <input id="ov-size" type="number" value="48" />
       </label>
-      <label><span data-i18n="style.maxlines">最大行数</span>
+      <label>
+        <span>最大行数</span>
         <input id="ov-max-lines" type="number" value="2" min="1" max="4" />
-        <span class="field-note" data-i18n-html="style.maxlines.note">行数按需增长：短句一行，放不下自动折到 2/3/4 行。<b>超出上限的部分直接换到下一句字幕显示</b>（英文新闻、访谈等长句场景），全程无滚动效果。填 1 = 严格单行 + 省略号。</span>
       </label>
-      <label><span data-i18n="style.bgsize">背景尺寸（px）</span>
-          <div class="size-row">
-            <div>
-              <span class="size-label" data-i18n="style.width">宽度</span>
-              <input id="ov-bg-width" type="number" value="0" placeholder="0=自动" min="0" />
-            </div>
-            <div>
-              <span class="size-label" data-i18n="style.height">高度</span>
-              <input id="ov-bg-height" type="number" value="0" placeholder="0=自动" min="0" />
-            </div>
-            <div>
-              <span class="size-label" data-i18n="style.radius">圆角</span>
-              <input id="ov-border-radius" type="number" value="8" min="0" />
-            </div>
+      <label>
+        <span>背景宽度 / 高度（px，0=自动）</span>
+        <div class="size-row">
+          <div>
+            <span class="size-label">宽度</span>
+            <input id="ov-bg-width" type="number" value="0" min="0" />
           </div>
-        </label>
-        <label><span data-i18n="style.opacity">背景透明度</span>
+          <div>
+            <span class="size-label">高度</span>
+            <input id="ov-bg-height" type="number" value="0" min="0" />
+          </div>
+          <div>
+            <span class="size-label">圆角</span>
+            <input id="ov-border-radius" type="number" value="8" min="0" />
+          </div>
+        </div>
+      </label>
+      <label>
+        <span>背景透明度</span>
+        <div class="opacity-row">
           <input id="ov-bg-opacity" type="range" min="0" max="100" value="75" />
           <span id="ov-opacity-display">75%</span>
-        </label>
-      <label><span data-i18n="style.color">颜色</span>
-        <input id="ov-color" type="color" value="#ffffff" />
+        </div>
       </label>
-      <label><span data-i18n="style.bg">背景</span>
-        <input id="ov-bg" type="color" value="#000000" />
+      <label>
+        <span>颜色 / 背景</span>
+        <div class="color-row">
+          <input id="ov-color" type="color" value="#ffffff" />
+          <input id="ov-bg" type="color" value="#000000" />
+        </div>
       </label>
-      <label><span data-i18n="style.position">位置</span>
+      <label>
+        <span>位置</span>
         <select id="ov-position">
-          <option value="bottom" data-i18n="style.pos.bottom">底部</option>
-          <option value="top" data-i18n="style.pos.top">顶部</option>
-          <option value="middle" data-i18n="style.pos.middle">中间</option>
+          <option value="bottom">底部</option>
+          <option value="top">顶部</option>
+          <option value="middle">中间</option>
         </select>
       </label>
-      <label><span data-i18n="style.animation">动画</span>
+      <label>
+        <span>动画</span>
         <select id="ov-animation">
-          <option value="typewriter" data-i18n="style.anim.typewriter">打字机</option>
-          <option value="fade" data-i18n="style.anim.fade">淡入淡出</option>
-          <option value="slide" data-i18n="style.anim.slide">滑入</option>
+          <option value="typewriter">打字机</option>
+          <option value="fade">淡入淡出</option>
+          <option value="slide">滑入</option>
         </select>
       </label>
     </section>
 
     <section class="card wide">
-      <h2 data-i18n="sec.preview">5. 实时字幕预览</h2>
+      <h2>5. 实时字幕预览</h2>
       <div class="preview">
         <div id="preview-stage" class="preview-stage position-bottom">
           <div id="preview-caption" class="preview-caption empty">
@@ -215,42 +222,62 @@
         </div>
       </div>
       <div class="actions">
-        <button id="save-btn" data-i18n="preview.save">保存配置</button>
-        <button id="restart-btn" class="ghost" data-i18n="preview.restart">重启管线</button>
-        <button id="clear-btn" class="ghost" data-i18n="preview.clear">清空字幕</button>
+        <button id="save-btn" class="btn primary" type="button">保存配置</button>
+        <button id="restart-btn" class="btn ghost" type="button">重启管线</button>
+        <button id="clear-btn" class="btn ghost" type="button">清空字幕</button>
         <span id="save-status" class="status"></span>
       </div>
       <div id="engine-error" class="engine-error" hidden></div>
       <div id="config-path" class="config-path"></div>
       <div id="overlay-url-box" class="overlay-url-box" hidden>
-        <label><span data-i18n="overlay.url.label">OBS 字幕源 URL（复制到 OBS 浏览器源）</span>
-          <input id="overlay-url" type="text" readonly onclick="this.select()" />
+        <label>
+          <span>OBS 字幕源 URL（复制到 OBS 浏览器源）</span>
+          <input id="overlay-url" type="text" readonly />
         </label>
-        <p class="obs-size-hint" data-i18n="overlay.sizehint">OBS 浏览器源推荐 1920×540 的尺寸</p>
+        <p class="hint">OBS 浏览器源推荐 1920×540 的尺寸</p>
       </div>
     </section>
 
     <section class="card wide">
-      <h2 data-i18n="sec.history">6. 翻译结果历史</h2>
-      <div id="history" class="history"></div>
+      <h2>6. 翻译结果历史</h2>
+      <div class="history-actions">
+        <label class="btn ghost file-btn">
+          <span>📂 导入字幕文件</span>
+          <input id="import-file" type="file" accept=".srt,.vtt,.txt,.json,text/plain" hidden />
+        </label>
+        <button id="clear-history-btn" class="btn ghost" type="button">清空历史</button>
+        <span class="hint" id="import-hint">支持 SRT / VTT / TXT / JSON（把字幕加到下方历史区，不写入服务器）</span>
+      </div>
+      <div id="history" class="history">
+        <div class="empty-tip">暂无字幕历史。说一句话、或导入一个 SRT/VTT 试试。</div>
+      </div>
     </section>
   </main>
 
   <div id="guide-modal" class="guide-modal" hidden>
     <div class="guide-box">
       <div class="guide-head">
-        <h3 data-i18n="guide.title">模型适配说明</h3>
-        <button id="guide-close" class="ghost guide-close" data-i18n="guide.close">关闭</button>
+        <h3>模型适配说明</h3>
+        <button id="guide-close" class="btn ghost guide-close" type="button">关闭</button>
       </div>
-      <div class="guide-body" data-i18n-html="guide.body"></div>
+      <div class="guide-body" id="guide-body"></div>
     </div>
   </div>
 
-  <script src="/admin-assets/app.js?v=0.0.30"></script>
   <div id="toast" class="toast" hidden></div>
+  <div id="err-overlay" class="err-overlay" hidden>
+    <div class="err-box">
+      <h3>⚠️ 页面错误</h3>
+      <pre id="err-msg"></pre>
+      <button id="err-dismiss" class="btn primary" type="button">关闭</button>
+    </div>
+  </div>
+
   <footer class="footer">
-    <span data-i18n="footer">本插件由不息传播制作</span>
-    <button id="support-btn" class="footer-support" data-i18n="support.btn">支持本项目</button>
+    <span>本插件由不息传播制作</span>
+    <button id="support-btn" class="btn ghost footer-support" type="button">支持本项目</button>
   </footer>
+
+  <script src="/admin-assets/app.js?v=0.1.0"></script>
 </body>
 </html>

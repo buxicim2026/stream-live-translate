@@ -1,4 +1,10 @@
-﻿pub mod audio;
+﻿// Windows: hide the console window when launched from OBS plugin (CreateProcessA
+// already uses CREATE_NO_WINDOW, but Rust still defaults to the console subsystem
+// which can briefly pop a window on startup or whenever something writes to
+// stderr). On other targets this attribute is a no-op.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
+pub mod audio;
 pub mod config;
 pub mod embedded;
 pub mod ingest;
