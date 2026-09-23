@@ -44,7 +44,15 @@ pub trait LlmProvider: Send + Sync {
 
 pub fn build(cfg: &LlmConfig) -> Result<Arc<dyn LlmProvider>> {
     match cfg.provider.as_str() {
-        "qwen-realtime" => Ok(Arc::new(qwen::QwenRealtime::new(cfg.clone())?)),
+        "qwen-realtime" => {
+            // asr-flash-message / asr-flash-streaming / fun-asr-realtime 走
+            // DashScope 双工协议（/api-ws/v1/inference），其余走 /realtime。
+            if qwen::is_duplex_model(&cfg.model) {
+                Ok(Arc::new(qwen_duplex::QwenDuplex::new(cfg.clone())?))
+            } else {
+                Ok(Arc::new(qwen::QwenRealtime::new(cfg.clone())?))
+            }
+        }
         "openai-realtime" => Ok(Arc::new(openai::OpenAiRealtime::new(cfg.clone())?)),
         "fun-asr-realtime" => Ok(Arc::new(funasr::FunAsr::new(cfg.clone())?)),
         "mock" => Ok(Arc::new(mock::MockProvider::new(cfg.clone())?) as Arc<dyn LlmProvider>),
@@ -94,20 +102,39 @@ pub mod qwen {
                 .clone()
                 .filter(|s| !s.trim().is_empty())
                 .unwrap_or_else(|| DEFAULT_ENDPOINT.to_string());
+            // 用户可能在两条通道之间切换模型而沿用了另一条的地址：自动纠正。
+            let endpoint = endpoint.replace("/inference", "/realtime");
             if cfg.api_key.is_empty() {
                 return Err(anyhow!("Qwen API key is empty; please fill it in the admin panel"));
             }
-            // Fun-ASR 流式识别（qwen-audio-*-asr-flash-streaming 等）走的是另一套
-            // WebSocket 协议，与本插件使用的 DashScope Realtime（/api-ws/v1/realtime）
-            // 不兼容，直接给出明确提示，而不是连接后各种报错。
-            if cfg.model.to_lowercase().contains("streaming") {
+            // 离线「录音文件识别(filetrans)」是 HTTP 批处理接口，不是实时流，
+            // 不能用于直播字幕，直接给出明确提示。
+            if cfg.model.to_lowercase().contains("filetrans") {
                 return Err(anyhow!(
-                    "模型 {} 属于 Fun-ASR 流式识别(Streaming)接口，与插件使用的 DashScope Realtime 协议不兼容，无法出字幕。请改用 Realtime 语音模型：qwen3.5-livetranslate-flash-realtime（同传翻译）、qwen3-asr-flash-realtime / qwen-audio-3.0-realtime-flash（实时识别）等。",
+                    "模型 {} 是离线「录音文件识别(Filetrans)」HTTP 接口，不能用于实时字幕。实时请用：qwen3.8-livetranslate-flash-realtime（同传翻译）、qwen-audio-3.1-realtime-plus / qwen3.8-omni-flash-realtime（实时语音）、qwen3-asr-flash-realtime 或 qwen-audio-3.1-asr-flash-message（实时识别）。",
+                    cfg.model
+                ));
+            }
+            // 名字里没有 realtime 的多半是 HTTP 接口（如 qwen-audio-3.1-asr-flash），
+            // 不能走 WebSocket 实时流。
+            if !cfg.model.to_lowercase().contains("realtime") {
+                return Err(anyhow!(
+                    "模型 {} 不是 Realtime 实时模型（可能是 HTTP 接口），无法用于实时字幕。请选择名字里带 realtime 的实时语音模型。",
                     cfg.model
                 ));
             }
             Ok(Self { cfg, endpoint })
         }
+    }
+
+    /// 判断模型是否走 DashScope「双工实时识别」协议（/api-ws/v1/inference），
+    /// 例如 qwen-audio-3.1-asr-flash-message / -streaming / fun-asr-realtime。
+    /// 这类模型由 `qwen_duplex` provider 处理，而不是 /realtime。
+    pub fn is_duplex_model(model: &str) -> bool {
+        let m = model.to_lowercase();
+        m.contains("asr-flash-message")
+            || m.contains("asr-flash-streaming")
+            || m.contains("fun-asr-realtime")
     }
 
     #[async_trait]
@@ -148,36 +175,78 @@ pub mod qwen {
             //     so we receive transcription delta/completed events.
             // Both use server VAD: the server detects speech end itself
             // and auto-commits, so we feed it a *continuous* audio stream.
-            let asr_mode = !self.cfg.model.to_lowercase().contains("livetranslate");
+            let model_lc = self.cfg.model.to_lowercase();
+            // 模型家族：新版 Qwen 语音模型的会话 schema 有差异，按家族分别配置。
+            //   * livetranslate：同传翻译，译文走 response.*，需要 translation.language
+            //   * omni：全模态实时，用 audio.input.format 新字段，转写需显式开启
+            //   * realtime-plus / audio 对话模型：转写事件无条件下发，不能乱发
+            //     input_audio_transcription
+            //   * asr-*-realtime：纯识别模型，需要 input_audio_transcription 指到自己
+            let is_translation = model_lc.contains("livetranslate");
+            let is_omni = model_lc.contains("omni");
+            let is_audio_chat = !is_translation
+                && !is_omni
+                && (model_lc.contains("realtime-plus")
+                    || (model_lc.contains("audio") && model_lc.contains("realtime")));
+            let needs_asr_cfg = !is_translation
+                && !is_omni
+                && !is_audio_chat
+                && model_lc.contains("asr");
+            // 通道隔离用：非翻译模型只看「说话人转写」通道。
+            let asr_mode = !is_translation;
+
             let segment_ms = self.cfg.segment_ms;
             // 低延迟模式（segment_ms > 0）= 手动模式：关掉服务端 VAD，由本机按段提交。
-            // 服务端 VAD 开着的时候，它只按自己的判定提交（即“等一句话说完才出结果”），
-            // 客户端发的 commit 会被忽略，低延迟就失效了；官方 manual 模式下
-            // 客户端 commit() 才会触发识别 / 翻译。
+            // 文档确认：turn_detection 置 null 即 push-to-talk 手动模式
+            // （仅首次音频之前可改）。
             let manual_mode = segment_ms > 0;
             let turn_detection = if manual_mode {
                 serde_json::Value::Null
             } else {
                 serde_json::json!({ "type": "server_vad" })
             };
-            let session_cfg: serde_json::Value = if asr_mode {
-                serde_json::json!({
-                    "modalities": ["text"],
-                    "sample_rate": 16000,
-                    "input_audio_format": "pcm",
-                    "input_audio_transcription": { "model": self.cfg.model },
-                    "turn_detection": turn_detection
-                })
+
+            let mut session_cfg = serde_json::Map::new();
+            session_cfg.insert("modalities".into(), serde_json::json!(["text"]));
+            session_cfg.insert("turn_detection".into(), turn_detection);
+            if is_omni {
+                // 3.5/3.8 Omni 推荐的新字段（旧字段仍兼容，但 3.8 要求首段音频前配置）。
+                session_cfg.insert(
+                    "audio".into(),
+                    serde_json::json!({
+                        "input":  { "format": { "type": "pcm", "sample_rate": 16000 } },
+                        "output": { "format": { "type": "pcm", "sample_rate": 24000 } }
+                    }),
+                );
             } else {
-                serde_json::json!({
-                    "modalities": ["text"],
-                    "sample_rate": 16000,
-                    "input_audio_format": "pcm",
-                    "input_audio_transcription": null,
-                    "turn_detection": turn_detection.clone(),
-                    "translation": { "language": self.cfg.target_lang }
-                })
-            };
+                session_cfg.insert("input_audio_format".into(), serde_json::json!("pcm"));
+                session_cfg.insert("sample_rate".into(), serde_json::json!(16000));
+            }
+            if is_translation {
+                session_cfg.insert(
+                    "translation".into(),
+                    serde_json::json!({ "language": self.cfg.target_lang }),
+                );
+                // 沿用 3.5 的行为：显式关闭输入转写，只保留译文流。
+                session_cfg.insert("input_audio_transcription".into(), serde_json::Value::Null);
+                // 3.8 同传的输出模态字段改名为 output_modalities。
+                if model_lc.contains("qwen3.8") {
+                    session_cfg
+                        .insert("output_modalities".into(), serde_json::json!(["text"]));
+                }
+            } else if is_omni {
+                // Omni 的「说话人转写」需要显式开启，子模型用标准实时 ASR。
+                session_cfg.insert(
+                    "input_audio_transcription".into(),
+                    serde_json::json!({ "model": "qwen3-asr-flash-realtime" }),
+                );
+            } else if needs_asr_cfg {
+                session_cfg.insert(
+                    "input_audio_transcription".into(),
+                    serde_json::json!({ "model": self.cfg.model }),
+                );
+            }
+            let session_cfg = serde_json::Value::Object(session_cfg);
             let session = serde_json::json!({ "type": "session.update", "session": session_cfg });
             write_half
                 .send(Message::Text(session.to_string().into()))
@@ -419,10 +488,14 @@ pub mod qwen {
             text: Option<String>,
         },
         /// Streaming ASR increment.
+        /// 旧版模型：`text` 是新增片段；新版（Omni 等）：`text` 是「已确认前缀」、
+        /// `stash` 是「待确认后缀」，需要做前缀差分而不是直接追加。
         #[serde(rename = "conversation.item.input_audio_transcription.delta")]
         TranscriptionDelta {
             #[serde(default)]
             text: Option<String>,
+            #[serde(default)]
+            stash: Option<String>,
         },
         /// ASR cumulative "stable so far" text (stash).
         #[serde(rename = "conversation.item.input_audio_transcription.text")]
@@ -463,11 +536,17 @@ pub mod qwen {
     if transcribe {
         // ---- 转写通道：ASR / 语音识别类模型 ----
         match ev {
-            QwenEvent::TranscriptionDelta { text } => {
+            QwenEvent::TranscriptionDelta { text, stash } => {
                 if let Some(t) = text {
                     if !t.is_empty() {
-                        sink.push(SubtitleEvent::Partial(t.clone()));
-                        pending.push_str(t);
+                        if stash.is_some() {
+                            // 新版语义：text 是「已确认前缀」→ 只推新增部分。
+                            accumulate(t, sink, pending);
+                        } else {
+                            // 旧版语义：text 就是新增片段 → 直接追加。
+                            sink.push(SubtitleEvent::Partial(t.clone()));
+                            pending.push_str(t);
+                        }
                     }
                 }
             }
@@ -545,6 +624,203 @@ pub mod qwen {
     }
     pending.clear();
   }
+}
+
+// ---------- DashScope 双工实时识别（/api-ws/v1/inference） ----------
+// 承载：qwen-audio-3.1-asr-flash-message / qwen-audio-3.x-asr-flash-streaming /
+// fun-asr-realtime。协议与 /realtime 不同：
+//   1) 发送 run-task（header.action=run-task，payload 带 task_group/task/function/
+//      model/parameters/input）
+//   2) 持续发送 16k 单声道 s16le PCM 二进制帧
+//   3) 发 finish-task 收尾
+// 服务端回 result-generated（payload.output.sentence.text / sentence_end）等事件。
+
+pub mod qwen_duplex {
+    use super::*;
+
+    const DEFAULT_ENDPOINT: &str = "wss://dashscope.aliyuncs.com/api-ws/v1/inference";
+
+    pub struct QwenDuplex {
+        cfg: LlmConfig,
+        endpoint: String,
+    }
+
+    impl QwenDuplex {
+        pub fn new(cfg: LlmConfig) -> Result<Self> {
+            let endpoint = cfg
+                .endpoint
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| DEFAULT_ENDPOINT.to_string());
+            // 双工识别通道：若沿用了 /realtime 地址则自动换成 /inference。
+            let endpoint = endpoint.replace("/realtime", "/inference");
+            if cfg.api_key.is_empty() {
+                return Err(anyhow!(
+                    "Qwen API key is empty; please fill it in the admin panel"
+                ));
+            }
+            Ok(Self { cfg, endpoint })
+        }
+    }
+
+    #[async_trait]
+    impl LlmProvider for QwenDuplex {
+        fn name(&self) -> &'static str {
+            "qwen-duplex"
+        }
+
+        async fn run(
+            self: Arc<Self>,
+            mut audio_rx: tokio::sync::mpsc::Receiver<Vec<i16>>,
+            sink: SubtitleSink,
+        ) -> Result<()> {
+            let mut req = self
+                .endpoint
+                .clone()
+                .into_client_request()
+                .with_context(|| "build dashscope duplex ws request")?;
+            req.headers_mut().insert(
+                "Authorization",
+                http::HeaderValue::from_str(&format!("Bearer {}", self.cfg.api_key))?,
+            );
+            req.headers_mut().insert(
+                "X-DashScope-DataInspection",
+                http::HeaderValue::from_static("disable"),
+            );
+            let (ws, _resp) = tokio_tungstenite::connect_async(req)
+                .await
+                .map_err(|e| ws_connect_error(e, "连接 DashScope 实时识别服务"))?;
+            let (mut write_half, mut read_half) = ws.split();
+
+            let task_id = uuid::Uuid::new_v4().to_string();
+            let mut params = serde_json::json!({ "format": "pcm", "sample_rate": 16000 });
+            // 该模型独有的「中间结果」开关：打开才有边说边出的 partial。
+            if self.cfg.model.to_lowercase().contains("asr-flash-message") {
+                params["intermediate_result_enabled"] = serde_json::json!(true);
+            }
+            let run_task = serde_json::json!({
+                "header": {
+                    "action": "run-task",
+                    "task_id": task_id.clone(),
+                    "streaming": "duplex"
+                },
+                "payload": {
+                    "task_group": "audio",
+                    "task": "asr",
+                    "function": "recognition",
+                    "model": self.cfg.model,
+                    "parameters": params,
+                    "input": {}
+                }
+            });
+            write_half
+                .send(Message::Text(run_task.to_string().into()))
+                .await
+                .map_err(|e| anyhow!("发送 run-task 失败：{e}"))?;
+
+            let read = {
+                let sink = sink.clone();
+                async move {
+                    // 当前句已显示的文本（用于把中间结果做前缀差分）。
+                    let mut seg = String::new();
+                    while let Some(msg) = read_half.next().await {
+                        let Ok(msg) = msg else { break };
+                        let Message::Text(t) = msg else { continue };
+                        let Ok(v) = serde_json::from_str::<serde_json::Value>(&t) else {
+                            continue;
+                        };
+                        let event = v
+                            .get("header")
+                            .and_then(|h| h.get("event"))
+                            .and_then(|e| e.as_str())
+                            .unwrap_or("");
+                        match event {
+                            "result-generated" => {
+                                let sentence = v
+                                    .get("payload")
+                                    .and_then(|p| p.get("output"))
+                                    .and_then(|o| o.get("sentence"));
+                                let text = sentence
+                                    .and_then(|s| s.get("text"))
+                                    .and_then(|s| s.as_str())
+                                    .unwrap_or("");
+                                if text.trim().is_empty() {
+                                    continue;
+                                }
+                                let end = sentence
+                                    .and_then(|s| s.get("sentence_end"))
+                                    .and_then(|b| b.as_bool())
+                                    .unwrap_or(false);
+                                if end {
+                                    sink.push(SubtitleEvent::Final(text.trim().to_string()));
+                                    seg.clear();
+                                } else if text.starts_with(seg.as_str()) {
+                                    let pc = seg.chars().count();
+                                    let suffix: String = text.chars().skip(pc).collect();
+                                    if !suffix.is_empty() {
+                                        sink.push(SubtitleEvent::Partial(suffix));
+                                        seg = text.to_string();
+                                    }
+                                } else {
+                                    if !seg.is_empty() {
+                                        sink.push(SubtitleEvent::Final(seg.clone()));
+                                    }
+                                    seg = text.to_string();
+                                    sink.push(SubtitleEvent::Partial(text.to_string()));
+                                }
+                            }
+                            "task-finished" => {
+                                info!("dashscope duplex task finished");
+                            }
+                            "task-failed" => {
+                                let msg = v
+                                    .get("header")
+                                    .and_then(|h| h.get("error_message"))
+                                    .and_then(|m| m.as_str())
+                                    .unwrap_or("");
+                                warn!(error=%msg, "dashscope duplex task failed");
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            };
+
+            let task_id_write = task_id.clone();
+            let write = async move {
+                while let Some(chunk) = audio_rx.recv().await {
+                    if chunk.is_empty() {
+                        continue;
+                    }
+                    let mut bytes = Vec::with_capacity(chunk.len() * 2);
+                    for s in &chunk {
+                        bytes.extend_from_slice(&s.to_le_bytes());
+                    }
+                    if write_half
+                        .send(Message::Binary(bytes.into()))
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                let finish = serde_json::json!({
+                    "header": { "action": "finish-task", "task_id": task_id_write },
+                    "payload": { "input": {} }
+                });
+                let _ = write_half
+                    .send(Message::Text(finish.to_string().into()))
+                    .await;
+                let _ = write_half.close().await;
+            };
+
+            tokio::select! {
+                _ = read => {}
+                _ = write => {}
+            }
+            Ok(())
+        }
+    }
 }
 
 // ---------- OpenAI realtime ----------

@@ -1,12 +1,12 @@
 [package]
 name = "stream-live-translate"
-version = "0.0.25"
+version = "0.0.33"
 edition = "2021"
 rust-version = "1.74"
 authors = ["Stream Live Translate Contributors"]
 description = "Real-time AI subtitle overlay for OBS Studio. Capture system audio, stream it to a realtime translation model, and render Chinese subtitles in a Browser Source."
 license = "MIT"
-repository = "https://github.com/yourname/stream-live-translate"
+repository = "https://github.com/buxicim2026/stream-live-translate"
 readme = "README.md"
 keywords = ["obs", "subtitles", "live", "translation", "ai"]
 categories = ["multimedia", "network"]

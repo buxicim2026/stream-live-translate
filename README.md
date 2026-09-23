@@ -33,6 +33,8 @@
 
 **云端可用**：通义 Qwen Realtime 语音（同传 / ASR / Qwen-Audio）、智谱 GLM-Realtime、OpenAI Realtime。
 
+> 通义新版已适配：`qwen3.8-livetranslate-flash-realtime`（同传，与 3.5 版可自由选择）、`qwen-audio-3.1-asr-flash-message` / `-streaming`（双工实时识别）、`qwen-audio-3.1-realtime-plus`、`qwen3.8-omni-flash-realtime`。其中 3.8 Omni、3.1 Realtime Plus 等新模型需把 Base URL 填成**业务空间专属地址**（`wss://<WorkspaceId>.<region>.maas.aliyuncs.com/api-ws/v1/realtime`；识别类为 `.../api-ws/v1/inference`）；`qwen-audio-3.1-asr-flash-filetrans` 是离线录音文件识别接口，不能用于实时字幕。
+
 **本地 / 自部署可用**：FunASR 流式识别、huggingface/speech-to-speech 网关，以及套了 Realtime 网关的其它 ASR（见下方命令）。
 
 **不可用**：纯文本 / 纯视觉模型、纯语音合成（TTS）、HTTP 上传式 ASR（非实时）——它们无法“听”实时音频，即使能连上也不会有字幕。

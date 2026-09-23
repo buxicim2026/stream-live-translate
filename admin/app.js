@@ -44,15 +44,18 @@
   // ---- Provider hints（直接内置；不再走 i18n 避免 key 缺失） -----------
   const PROVIDER_HINTS = {
     "qwen": {
-      boxHtml: `<strong>💡 通义 Qwen API</strong><br />只能用 qwen3 系列<strong>语音（多模态）Realtime</strong>实时模型。同传翻译：<code>qwen3.5-livetranslate-flash-realtime</code>；实时识别：<code>qwen3-asr-flash-realtime</code> 或 <code>qwen-audio-3.0-realtime-flash</code>。`,
-      modelPlaceholder: "qwen3.5-livetranslate-flash-realtime",
+      boxHtml: `<strong>💡 通义 Qwen API</strong><br />只能选<strong>实时</strong>语音模型（名字带 realtime，或双工识别的 asr-flash-message）；filetrans 等非 realtime 是 HTTP 接口，做不了字幕。<br />翻译：<code>qwen3.8-livetranslate-flash-realtime</code>；识别：<code>qwen3-asr-flash-realtime</code> / <code>qwen-audio-3.1-asr-flash-message</code>；对话：<code>qwen-audio-3.1-realtime-plus</code> 等。<br /><strong>注意：</strong>3.8 Omni、3.1 Realtime Plus 等新模型必须用<strong>业务空间专属地址</strong>，请把 Base URL 填成 <code>wss://&lt;WorkspaceId&gt;.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime</code>（识别类为 .../api-ws/v1/inference）。`,
+      modelPlaceholder: "qwen3.8-livetranslate-flash-realtime",
       modelSuggestions: [
-        { value: "qwen3.5-livetranslate-flash-realtime", label: "同传翻译（推荐，多语言→目标语言）" },
-        { value: "qwen3-asr-flash-realtime", label: "实时语音识别（ASR，边说边出字幕）" },
-        { value: "qwen-audio-3.0-realtime-flash", label: "Qwen-Audio 3.0 实时（语音对话）" },
-        { value: "qwen-audio-realtime-plus", label: "Qwen-Audio Realtime Plus（语音对话）" }
+        { value: "qwen3.8-livetranslate-flash-realtime", label: "同传翻译·3.8（推荐）" },
+        { value: "qwen3.5-livetranslate-flash-realtime", label: "同传翻译·3.5" },
+        { value: "qwen3-asr-flash-realtime", label: "实时语音识别（ASR）" },
+        { value: "qwen-audio-3.1-asr-flash-message", label: "实时识别·3.1 双工（消息式）" },
+        { value: "qwen-audio-3.1-asr-flash-streaming", label: "实时识别·3.1 流式" },
+        { value: "qwen-audio-3.1-realtime-plus", label: "实时语音对话·3.1 Plus（转写当字幕）" },
+        { value: "qwen3.8-omni-flash-realtime", label: "全模态实时·3.8 Omni（需专属域名）" }
       ],
-      endpointPlaceholder: "留空使用内置默认（wss://dashscope.aliyuncs.com/api-ws/v1/realtime）",
+      endpointPlaceholder: "留空用默认；新模型建议填业务空间专属地址",
       endpointDefault: "",
       className: "qwen-hint"
     },
@@ -711,6 +714,7 @@
       body.innerHTML = `
         <p>本插件只能使用能<strong>实时接收语音、并边听边返回字幕文字</strong>的<strong>语音（多模态）Realtime</strong>模型。</p>
         <p><strong>云端可用：</strong>通义 Qwen Realtime 语音（同传 / ASR / Qwen-Audio）、智谱 GLM-Realtime、OpenAI Realtime。</p>
+        <p><strong>通义 Qwen 新版已适配：</strong>3.8 同传、3.1 ASR 双工（asr-flash-message / -streaming）、3.1 Realtime Plus、3.8 Omni。其中 3.8 Omni、3.1 Realtime Plus 等需把 Base URL 填成<strong>业务空间专属地址</strong>（<code>wss://&lt;WorkspaceId&gt;.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime</code>）；filetrans 是离线接口，不能做实时字幕。</p>
         <p><strong>本地 / 自部署可用：</strong></p>
         <ul>
           <li><strong>FunASR 流式识别</strong>（SenseVoice / Fun-ASR-Nano / paraformer-zh）：内置通道，默认 <code>ws://127.0.0.1:10095</code>；按 FunASR 官方 runtime 文档起 Docker 即可。</li>

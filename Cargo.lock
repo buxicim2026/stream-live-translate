@@ -1614,7 +1614,7 @@ dependencies = [
 
 [[package]]
 name = "stream-live-translate"
-version = "0.0.25"
+version = "0.0.33"
 dependencies = [
  "anyhow",
  "async-trait",
