@@ -41,18 +41,54 @@
     toastTimer = setTimeout(() => { el.hidden = true; }, 3500);
   }
 
+  // ---- 液态玻璃 / 性能模式 ----------------------------------------------
+  // 默认开启液态玻璃（极光背景 + 毛玻璃）；顶栏按钮可切到性能模式
+  // （关闭全部特效，省集显），选择记在 localStorage 里下次沿用。
+  const PERF_MODE_KEY = "slt.perfMode";
+  function readPerfMode() {
+    try { return localStorage.getItem(PERF_MODE_KEY) === "1"; } catch { return false; }
+  }
+  function writePerfMode(on) {
+    try { localStorage.setItem(PERF_MODE_KEY, on ? "1" : "0"); } catch { /* 忽略 */ }
+  }
+  function setPerfMode(on) {
+    document.body.classList.toggle("perf-mode", on);
+    const btn = $("perf-mode-btn");
+    if (btn) {
+      btn.textContent = on ? "切换到液态玻璃" : "切换到性能模式";
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+      btn.title = on
+        ? "当前为性能模式（已关闭液态玻璃特效）。点击恢复液态玻璃效果。"
+        : "关闭液态玻璃特效（极光动画、毛玻璃模糊、高光扫动），降低集显占用";
+    }
+    writePerfMode(on);
+  }
+  function initPerfMode() {
+    setPerfMode(readPerfMode());
+    const btn = $("perf-mode-btn");
+    if (btn) {
+      btn.addEventListener("click", () => {
+        setPerfMode(!document.body.classList.contains("perf-mode"));
+      });
+    }
+  }
+  initPerfMode();
+
   // ---- Provider hints（直接内置；不再走 i18n 避免 key 缺失） -----------
   const PROVIDER_HINTS = {
     "qwen": {
-      boxHtml: `<strong>💡 通义 Qwen API</strong><br />只能用 qwen3 系列<strong>语音（多模态）Realtime</strong>实时模型。同传翻译：<code>qwen3.5-livetranslate-flash-realtime</code>；实时识别：<code>qwen3-asr-flash-realtime</code> 或 <code>qwen-audio-3.0-realtime-flash</code>。`,
-      modelPlaceholder: "qwen3.5-livetranslate-flash-realtime",
+      boxHtml: `<strong>💡 通义 Qwen API</strong><br />只能选<strong>实时</strong>语音模型（名字带 realtime，或双工识别的 asr-flash-message）；filetrans 等非 realtime 是 HTTP 接口，做不了字幕。<br />翻译：<code>qwen3.8-livetranslate-flash-realtime</code>；识别：<code>qwen3-asr-flash-realtime</code> / <code>qwen-audio-3.1-asr-flash-message</code>；对话：<code>qwen-audio-3.1-realtime-plus</code> 等。<br /><strong>注意：</strong>3.8 系列（同传 / Omni）、3.1 Realtime Plus 等新模型建议用<strong>业务空间专属地址</strong>：<code>wss://&lt;WorkspaceId&gt;.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime</code>（双工识别为 .../api-ws/v1/inference）。3.8 同传的会话字段（output_modalities / audio.input.turn_detection）已按官方文档单独适配，它自带增量译文输出；「低延迟模式」对它自动忽略，主要给 3.5 同传 / ASR 模型用。`,
+      modelPlaceholder: "qwen3.8-livetranslate-flash-realtime",
       modelSuggestions: [
-        { value: "qwen3.5-livetranslate-flash-realtime", label: "同传翻译（推荐，多语言→目标语言）" },
-        { value: "qwen3-asr-flash-realtime", label: "实时语音识别（ASR，边说边出字幕）" },
-        { value: "qwen-audio-3.0-realtime-flash", label: "Qwen-Audio 3.0 实时（语音对话）" },
-        { value: "qwen-audio-realtime-plus", label: "Qwen-Audio Realtime Plus（语音对话）" }
+        { value: "qwen3.8-livetranslate-flash-realtime", label: "同传翻译·3.8（推荐）" },
+        { value: "qwen3.5-livetranslate-flash-realtime", label: "同传翻译·3.5" },
+        { value: "qwen3-asr-flash-realtime", label: "实时语音识别（ASR）" },
+        { value: "qwen-audio-3.1-asr-flash-message", label: "实时识别·3.1 双工（消息式）" },
+        { value: "qwen-audio-3.1-asr-flash-streaming", label: "实时识别·3.1 流式" },
+        { value: "qwen-audio-3.1-realtime-plus", label: "实时语音对话·3.1 Plus（转写当字幕）" },
+        { value: "qwen3.8-omni-flash-realtime", label: "全模态实时·3.8 Omni（需专属域名）" }
       ],
-      endpointPlaceholder: "留空使用内置默认（wss://dashscope.aliyuncs.com/api-ws/v1/realtime）",
+      endpointPlaceholder: "留空用默认；新模型建议填业务空间专属地址",
       endpointDefault: "",
       className: "qwen-hint"
     },
@@ -711,6 +747,7 @@
       body.innerHTML = `
         <p>本插件只能使用能<strong>实时接收语音、并边听边返回字幕文字</strong>的<strong>语音（多模态）Realtime</strong>模型。</p>
         <p><strong>云端可用：</strong>通义 Qwen Realtime 语音（同传 / ASR / Qwen-Audio）、智谱 GLM-Realtime、OpenAI Realtime。</p>
+        <p><strong>通义 Qwen 新版已适配：</strong>3.8 同传、3.1 ASR 双工（asr-flash-message / -streaming）、3.1 Realtime Plus、3.8 Omni。其中 3.8 Omni、3.1 Realtime Plus 等需把 Base URL 填成<strong>业务空间专属地址</strong>（<code>wss://&lt;WorkspaceId&gt;.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime</code>）；filetrans 是离线接口，不能做实时字幕。</p>
         <p><strong>本地 / 自部署可用：</strong></p>
         <ul>
           <li><strong>FunASR 流式识别</strong>（SenseVoice / Fun-ASR-Nano / paraformer-zh）：内置通道，默认 <code>ws://127.0.0.1:10095</code>；按 FunASR 官方 runtime 文档起 Docker 即可。</li>

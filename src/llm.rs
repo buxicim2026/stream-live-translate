@@ -206,48 +206,67 @@ pub mod qwen {
                 serde_json::json!({ "type": "server_vad" })
             };
 
-            let mut session_cfg = serde_json::Map::new();
-            session_cfg.insert("modalities".into(), serde_json::json!(["text"]));
-            session_cfg.insert("turn_detection".into(), turn_detection);
-            if is_omni {
-                // 3.5/3.8 Omni 推荐的新字段（旧字段仍兼容，但 3.8 要求首段音频前配置）。
-                session_cfg.insert(
-                    "audio".into(),
-                    serde_json::json!({
-                        "input":  { "format": { "type": "pcm", "sample_rate": 16000 } },
-                        "output": { "format": { "type": "pcm", "sample_rate": 24000 } }
-                    }),
-                );
+            // qwen3.8 同传的会话 schema 与 3.5 不同（依据官方「客户端事件」文档）：
+            //   * 输出模态用顶层 output_modalities（3.5 才是 modalities）
+            //   * 语音检测在 audio.input.turn_detection（3.5 是顶层 turn_detection）
+            //   * 顶层 input_audio_format / sample_rate / modalities 未标注适用于 3.8
+            // 因此 3.8 单独走一个最小会话，避免下发它不认识的字段导致会话直接失败。
+            let is_lt38 = is_translation && model_lc.contains("qwen3.8");
+            let session = if is_lt38 {
+                serde_json::json!({
+                    "type": "session.update",
+                    "session": {
+                        "output_modalities": ["text"],
+                        "translation": { "language": self.cfg.target_lang },
+                        "audio": {
+                            "input": {
+                                "turn_detection": { "type": "server_vad" }
+                            }
+                        }
+                    }
+                })
             } else {
-                session_cfg.insert("input_audio_format".into(), serde_json::json!("pcm"));
-                session_cfg.insert("sample_rate".into(), serde_json::json!(16000));
-            }
-            if is_translation {
-                session_cfg.insert(
-                    "translation".into(),
-                    serde_json::json!({ "language": self.cfg.target_lang }),
-                );
-                // 沿用 3.5 的行为：显式关闭输入转写，只保留译文流。
-                session_cfg.insert("input_audio_transcription".into(), serde_json::Value::Null);
-                // 3.8 同传的输出模态字段改名为 output_modalities。
-                if model_lc.contains("qwen3.8") {
-                    session_cfg
-                        .insert("output_modalities".into(), serde_json::json!(["text"]));
+                let mut session_cfg = serde_json::Map::new();
+                session_cfg.insert("modalities".into(), serde_json::json!(["text"]));
+                session_cfg.insert("turn_detection".into(), turn_detection);
+                if is_omni {
+                    // 3.5/3.8 Omni 推荐的新字段（旧字段仍兼容，但 3.8 要求首段音频前配置）。
+                    session_cfg.insert(
+                        "audio".into(),
+                        serde_json::json!({
+                            "input":  { "format": { "type": "pcm", "sample_rate": 16000 } },
+                            "output": { "format": { "type": "pcm", "sample_rate": 24000 } }
+                        }),
+                    );
+                } else {
+                    session_cfg.insert("input_audio_format".into(), serde_json::json!("pcm"));
+                    session_cfg.insert("sample_rate".into(), serde_json::json!(16000));
                 }
-            } else if is_omni {
-                // Omni 的「说话人转写」需要显式开启，子模型用标准实时 ASR。
-                session_cfg.insert(
-                    "input_audio_transcription".into(),
-                    serde_json::json!({ "model": "qwen3-asr-flash-realtime" }),
-                );
-            } else if needs_asr_cfg {
-                session_cfg.insert(
-                    "input_audio_transcription".into(),
-                    serde_json::json!({ "model": self.cfg.model }),
-                );
-            }
-            let session_cfg = serde_json::Value::Object(session_cfg);
-            let session = serde_json::json!({ "type": "session.update", "session": session_cfg });
+                if is_translation {
+                    session_cfg.insert(
+                        "translation".into(),
+                        serde_json::json!({ "language": self.cfg.target_lang }),
+                    );
+                    // 沿用 3.5 的行为：显式关闭输入转写，只保留译文流。
+                    session_cfg
+                        .insert("input_audio_transcription".into(), serde_json::Value::Null);
+                } else if is_omni {
+                    // Omni 的「说话人转写」需要显式开启，子模型用标准实时 ASR。
+                    session_cfg.insert(
+                        "input_audio_transcription".into(),
+                        serde_json::json!({ "model": "qwen3-asr-flash-realtime" }),
+                    );
+                } else if needs_asr_cfg {
+                    session_cfg.insert(
+                        "input_audio_transcription".into(),
+                        serde_json::json!({ "model": self.cfg.model }),
+                    );
+                }
+                serde_json::json!({
+                    "type": "session.update",
+                    "session": serde_json::Value::Object(session_cfg)
+                })
+            };
             write_half
                 .send(Message::Text(session.to_string().into()))
                 .await?;
@@ -311,7 +330,9 @@ pub mod qwen {
             //     重复句检测会兜掉多余的一句）。
             let translation_channel = !asr_mode;
             let write = async move {
-                let commit_enabled = segment_ms > 0;
+                // 3.8 同传没有文档化的手动模式（会话走 server_vad + 自带增量输出），
+                // 此时忽略低延迟分段，避免往 server_vad 会话里乱发 commit。
+                let commit_enabled = segment_ms > 0 && !is_lt38;
                 let mut voiced_ms: u64 = 0; // 当前这段里已累计的有声时长(ms)
                 let mut tail_ms: u64 = 0; // 有声之后跟随的静音时长(ms)
                 let mut in_segment = false; // 是否正在收集一段语音（手动模式用）

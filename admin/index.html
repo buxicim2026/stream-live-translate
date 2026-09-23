@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <title>Stream Live Translate · 控制台</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <link rel="stylesheet" href="/admin-assets/style.css?v=0.1.0" />
+  <link rel="stylesheet" href="/admin-assets/style.css?v=0.1.1" />
 </head>
 <body>
   <header class="topbar">
@@ -12,6 +12,8 @@
       <span class="logo">●</span>
       <span class="brand-name">Stream Live Translate</span>
     </div>
+    <button id="perf-mode-btn" class="perf-btn" type="button" aria-pressed="false"
+            title="关闭液态玻璃特效（极光动画、毛玻璃模糊、高光扫动），降低集显占用">切换到性能模式</button>
     <div class="status-strip" id="status-strip">
       <span class="dot" id="dot-audio" title="音频输入"></span><span class="lbl">音频</span>
       <span class="dot" id="dot-llm" title="大模型"></span><span class="lbl">大模型</span>
@@ -278,6 +280,6 @@
     <button id="support-btn" class="btn ghost footer-support" type="button">支持本项目</button>
   </footer>
 
-  <script src="/admin-assets/app.js?v=0.1.0"></script>
+  <script src="/admin-assets/app.js?v=0.1.1"></script>
 </body>
 </html>

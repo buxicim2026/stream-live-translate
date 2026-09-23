@@ -41,10 +41,43 @@
     toastTimer = setTimeout(() => { el.hidden = true; }, 3500);
   }
 
+  // ---- 液态玻璃 / 性能模式 ----------------------------------------------
+  // 默认开启液态玻璃（极光背景 + 毛玻璃）；顶栏按钮可切到性能模式
+  // （关闭全部特效，省集显），选择记在 localStorage 里下次沿用。
+  const PERF_MODE_KEY = "slt.perfMode";
+  function readPerfMode() {
+    try { return localStorage.getItem(PERF_MODE_KEY) === "1"; } catch { return false; }
+  }
+  function writePerfMode(on) {
+    try { localStorage.setItem(PERF_MODE_KEY, on ? "1" : "0"); } catch { /* 忽略 */ }
+  }
+  function setPerfMode(on) {
+    document.body.classList.toggle("perf-mode", on);
+    const btn = $("perf-mode-btn");
+    if (btn) {
+      btn.textContent = on ? "切换到液态玻璃" : "切换到性能模式";
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+      btn.title = on
+        ? "当前为性能模式（已关闭液态玻璃特效）。点击恢复液态玻璃效果。"
+        : "关闭液态玻璃特效（极光动画、毛玻璃模糊、高光扫动），降低集显占用";
+    }
+    writePerfMode(on);
+  }
+  function initPerfMode() {
+    setPerfMode(readPerfMode());
+    const btn = $("perf-mode-btn");
+    if (btn) {
+      btn.addEventListener("click", () => {
+        setPerfMode(!document.body.classList.contains("perf-mode"));
+      });
+    }
+  }
+  initPerfMode();
+
   // ---- Provider hints（直接内置；不再走 i18n 避免 key 缺失） -----------
   const PROVIDER_HINTS = {
     "qwen": {
-      boxHtml: `<strong>💡 通义 Qwen API</strong><br />只能选<strong>实时</strong>语音模型（名字带 realtime，或双工识别的 asr-flash-message）；filetrans 等非 realtime 是 HTTP 接口，做不了字幕。<br />翻译：<code>qwen3.8-livetranslate-flash-realtime</code>；识别：<code>qwen3-asr-flash-realtime</code> / <code>qwen-audio-3.1-asr-flash-message</code>；对话：<code>qwen-audio-3.1-realtime-plus</code> 等。<br /><strong>注意：</strong>3.8 Omni、3.1 Realtime Plus 等新模型必须用<strong>业务空间专属地址</strong>，请把 Base URL 填成 <code>wss://&lt;WorkspaceId&gt;.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime</code>（识别类为 .../api-ws/v1/inference）。`,
+      boxHtml: `<strong>💡 通义 Qwen API</strong><br />只能选<strong>实时</strong>语音模型（名字带 realtime，或双工识别的 asr-flash-message）；filetrans 等非 realtime 是 HTTP 接口，做不了字幕。<br />翻译：<code>qwen3.8-livetranslate-flash-realtime</code>；识别：<code>qwen3-asr-flash-realtime</code> / <code>qwen-audio-3.1-asr-flash-message</code>；对话：<code>qwen-audio-3.1-realtime-plus</code> 等。<br /><strong>注意：</strong>3.8 系列（同传 / Omni）、3.1 Realtime Plus 等新模型建议用<strong>业务空间专属地址</strong>：<code>wss://&lt;WorkspaceId&gt;.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime</code>（双工识别为 .../api-ws/v1/inference）。3.8 同传的会话字段（output_modalities / audio.input.turn_detection）已按官方文档单独适配，它自带增量译文输出；「低延迟模式」对它自动忽略，主要给 3.5 同传 / ASR 模型用。`,
       modelPlaceholder: "qwen3.8-livetranslate-flash-realtime",
       modelSuggestions: [
         { value: "qwen3.8-livetranslate-flash-realtime", label: "同传翻译·3.8（推荐）" },
