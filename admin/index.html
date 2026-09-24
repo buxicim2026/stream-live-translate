@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <title>Stream Live Translate · 控制台</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <link rel="stylesheet" href="/admin-assets/style.css?v=0.1.1" />
+  <link rel="stylesheet" href="/admin-assets/style.css?v=0.1.2" />
 </head>
 <body>
   <header class="topbar">
@@ -37,12 +37,18 @@
           <option value="qwen">通义 Qwen API（推荐）</option>
           <option value="glm">智谱 GLM-Realtime</option>
           <option value="online">OpenAI / 其它在线 API</option>
+          <option value="azure">Azure OpenAI Realtime</option>
+          <option value="gemini">Google Gemini Live</option>
+          <option value="deepgram">Deepgram 实时转写</option>
+          <option value="assemblyai">AssemblyAI 实时转写</option>
+          <option value="volc">火山引擎·豆包流式识别</option>
+          <option value="xfyun">讯飞·实时语音转写（RTASR）</option>
           <option value="local">本机部署 API（Ollama / LocalAI 等）</option>
           <option value="funasr">FunASR 本地流式识别（自部署）</option>
           <option value="mock">模拟模式（不消耗额度）</option>
         </select>
       </label>
-      <div id="provider-hint-box" class="provider-hint-box">提示加载中…</div>
+      <p class="hint tiny">Key / Model / 地址怎么填？点上方「模型适配说明」，里面有推荐模型与各家服务的详细填法。</p>
 
       <label>
         <span>Model（模型名称）</span>
@@ -280,6 +286,6 @@
     <button id="support-btn" class="btn ghost footer-support" type="button">支持本项目</button>
   </footer>
 
-  <script src="/admin-assets/app.js?v=0.1.1"></script>
+  <script src="/admin-assets/app.js?v=0.1.2"></script>
 </body>
 </html>

@@ -1,6 +1,6 @@
 [package]
 name = "stream-live-translate"
-version = "0.0.33"
+version = "0.0.34"
 edition = "2021"
 rust-version = "1.74"
 authors = ["Stream Live Translate Contributors"]
@@ -78,9 +78,15 @@ parking_lot = "0.12"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 sha2 = "0.10"
+sha1 = "0.10"
+hmac = "0.12"
+md-5 = "0.10"
 hex = "0.4"
 base64 = "0.22"
 rand = "0.8"
+
+# 火山引擎豆包 ASR 的二进制协议要求 gzip 压缩载荷
+flate2 = "1"
 
 # Embed dist/ (overlay + admin + default config.toml) into the binary
 # at compile time so the final distributable is a SINGLE file. End users

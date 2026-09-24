@@ -146,16 +146,272 @@
       endpointPlaceholder: "无需填写",
       endpointDefault: "",
       className: "qwen-hint"
+    },
+    "azure": {
+      boxHtml: `<strong>☁️ Azure OpenAI Realtime</strong><br />协议与 OpenAI Realtime 相同，但<strong>鉴权用 <code>api-key</code> 头</strong>，且地址要<strong>整条粘贴</strong>（含 <code>api-version</code> / <code>deployment</code>），例如 <code>wss://&lt;资源名&gt;.openai.azure.com/openai/v1/realtime?model=&lt;部署名&gt;</code>。做字幕请勾选「实时字幕模式」；<code>gpt-live-transcribe</code> / <code>gpt-realtime-whisper</code> 会自动走新版听录会话。`,
+      modelPlaceholder: "gpt-realtime（或你的部署名）",
+      modelSuggestions: [
+        { value: "gpt-realtime", label: "GPT-Realtime（对话/转写）" },
+        { value: "gpt-live-transcribe", label: "gpt-live-transcribe（听录，GA 会话）" },
+        { value: "gpt-realtime-whisper", label: "gpt-realtime-whisper（流式听录）" },
+        { value: "gpt-4o-realtime-preview", label: "GPT-4o Realtime（旧版）" }
+      ],
+      endpointPlaceholder: "wss://<资源名>.openai.azure.com/openai/v1/realtime?model=<部署名>",
+      endpointDefault: "",
+      className: "online-hint"
+    },
+    "gemini": {
+      boxHtml: `<strong>✨ Google Gemini Live API</strong><br />原生 WebSocket 双向流式，Key 填 <strong>Google AI Studio 的 API Key</strong>。转写用 <code>gemini-2.5-flash-live</code>；实时翻译用 <code>gemini-3.5-live-translate-preview</code>（字幕显示译文）。本插件自动发送 16kHz PCM，并只取「说话人转写」通道，不会把模型自己的话当字幕。<br /><strong>注意：</strong>需能直连 Google；国内一般要自建中转，把 Base URL 换成你的中转端点即可（端点需保留路径，只是域名不同）。`,
+      modelPlaceholder: "gemini-2.5-flash-live",
+      modelSuggestions: [
+        { value: "gemini-2.5-flash-live", label: "Gemini 2.5 Flash Live（转写，推荐）" },
+        { value: "gemini-2.0-flash-live-001", label: "Gemini 2.0 Flash Live" },
+        { value: "gemini-3.5-live-translate-preview", label: "Live Translate（实时翻译→译文）" },
+        { value: "gemini-2.5-flash-native-audio-preview", label: "2.5 Flash Native Audio（对话）" }
+      ],
+      endpointPlaceholder: "留空用官方默认端点；国内可填自建中转地址",
+      endpointDefault: "",
+      className: "qwen-hint"
+    },
+    "deepgram": {
+      boxHtml: `<strong>🎧 Deepgram 实时转写</strong><br />英文/多语种流式转写（<code>nova-3</code>），Key 用 Deepgram 控制台的 API Key。默认端点 <code>wss://api.deepgram.com/v1/listen</code>，插件已自动带 16kHz PCM 与中间结果参数；<strong>要指定语言可在 Base URL 追加 <code>?language=zh</code></strong>（已写过的参数不会被覆盖）。<br /><strong>只做转写，不做翻译</strong>，适合「英文直播配英文字幕」或缺中文模型时的兜底。`,
+      modelPlaceholder: "nova-3",
+      modelSuggestions: [
+        { value: "nova-3", label: "Nova-3（多语种，推荐）" },
+        { value: "nova-2", label: "Nova-2" },
+        { value: "enhanced", label: "Enhanced（便宜）" }
+      ],
+      endpointPlaceholder: "wss://api.deepgram.com/v1/listen（可加 ?language=zh）",
+      endpointDefault: "wss://api.deepgram.com/v1/listen",
+      className: "online-hint"
+    },
+    "assemblyai": {
+      boxHtml: `<strong>🎧 AssemblyAI 实时转写（Streaming v3）</strong><br />英文流式转写，Key 用 AssemblyAI 控制台的 API Key（<strong>只填 key，不要加 Bearer</strong>，插件会按 v3 规范拼 <code>Authorization: &lt;key&gt;</code>）。默认端点 <code>wss://streaming.assemblyai.com/v3/ws</code>，按「轮次(turn)」输出字幕。<br /><strong>只做转写，不做翻译。</strong>`,
+      modelPlaceholder: "universal-streaming-english（可留空）",
+      modelSuggestions: [
+        { value: "universal-streaming-english", label: "Universal Streaming English" },
+        { value: "universal-3-5-pro", label: "Universal 3.5 Pro" }
+      ],
+      endpointPlaceholder: "wss://streaming.assemblyai.com/v3/ws",
+      endpointDefault: "wss://streaming.assemblyai.com/v3/ws",
+      className: "online-hint"
+    },
+    "volc": {
+      boxHtml: `<strong>🔥 火山引擎 · 豆包流式语音识别</strong><br />国内直播最常用、性价比高，<strong>边说边出字</strong>。Key 填豆包语音控制台的 <strong>API Key</strong>；Model 字段填<strong>资源 ID</strong>（默认 <code>volc.seedasr.sauc.duration</code> = 2.0 小时版）。<br /><strong>注意：</strong>需先在控制台开通「流式语音识别」，并保证该资源 ID 已授权；本适配走官方二进制协议（16kHz PCM），分句结果会自动断句。<strong>只做识别、不做翻译。</strong>`,
+      modelPlaceholder: "volc.seedasr.sauc.duration",
+      modelSuggestions: [
+        { value: "volc.seedasr.sauc.duration", label: "豆包流式识别 2.0 · 小时版（推荐）" },
+        { value: "volc.seedasr.sauc.concurrent", label: "豆包流式识别 2.0 · 并发版" },
+        { value: "volc.bigasr.sauc.duration", label: "豆包流式识别 1.0 · 小时版" },
+        { value: "volc.bigasr.sauc.concurrent", label: "豆包流式识别 1.0 · 并发版" }
+      ],
+      endpointPlaceholder: "留空用官方默认（openspeech.bytedance.com 双向流式接口）",
+      endpointDefault: "",
+      className: "qwen-hint"
+    },
+    "xfyun": {
+      boxHtml: `<strong>🎙️ 讯飞 · 实时语音转写（RTASR）</strong><br />Key 必须填 <strong><code>appid:apiKey</code> 两段</strong>（在讯飞控制台应用里取，用英文冒号连接）；Model 字段填<strong>源语言</strong>：<code>cn</code>（中文/中英混合，默认）或 <code>en</code>。<br />本适配只做<strong>听写</strong>（返回原文、不做翻译），签名（HMAC-SHA1）与 40ms 分帧已自动处理。`,
+      modelPlaceholder: "cn 或 en（源语言，可留空）",
+      modelSuggestions: [
+        { value: "cn", label: "cn（中文 / 中英混合，默认）" },
+        { value: "en", label: "en（英文）" }
+      ],
+      endpointPlaceholder: "留空用官方默认（ws[s]://rtasr.xfyun.cn/v1/ws）",
+      endpointDefault: "",
+      className: "online-hint"
     }
   };
   const PROVIDER_TYPE_MAP = {
     "qwen": "qwen-realtime",
     "glm": "openai-realtime",
     "online": "openai-realtime",
+    "azure": "openai-realtime",
     "local": "openai-realtime",
     "funasr": "fun-asr-realtime",
+    "gemini": "gemini-live",
+    "deepgram": "deepgram",
+    "assemblyai": "assemblyai",
+    "volc": "volc-asr",
+    "xfyun": "xfyun-rtasr",
     "mock": "mock"
   };
+
+  // ---- 「模型适配说明」内容 ----------------------------------------------
+  // 每家一段：Key 怎么填 / Model 怎么填 / Base URL / 推荐场景 / 注意。
+  // 段落开头的简介复用 PROVIDER_HINTS[t].boxHtml，避免两处维护。
+  const GUIDE_SECTIONS = [
+    {
+      t: "qwen",
+      title: "① 通义 Qwen（阿里云百炼）",
+      badge: "首选 · 同传翻译",
+      key: "百炼控制台（Model Studio）的 API Key，形如 <code>sk-…</code>。",
+      model: "外语→中文字幕：<code>qwen3.8-livetranslate-flash-realtime</code>（首选）或 <code>qwen3.5-livetranslate-flash-realtime</code>；中文→中文字幕：<code>qwen3-asr-flash-realtime</code>；双工识别：<code>qwen-audio-3.1-asr-flash-message</code>；语音对话：<code>qwen-audio-3.1-realtime-plus</code>。",
+      url: "留空即用官方默认 <code>wss://dashscope.aliyuncs.com/api-ws/v1/realtime</code>；<strong>3.8 / 3.1 等新模型建议填业务空间专属地址</strong> <code>wss://&lt;WorkspaceId&gt;.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime</code>（双工识别为 <code>.../api-ws/v1/inference</code>）。",
+      use: "外语直播的同声传译（3.8 同传自带增量输出、延迟更低）；纯中文直播只要中文字幕时建议改用 ASR 模型。",
+      note: "不能填 <code>filetrans</code> 这类离线 HTTP 接口，做不了实时字幕；3.8 同传的会话字段已按官方文档单独适配，「低延迟模式」对它自动忽略。"
+    },
+    {
+      t: "volc",
+      title: "② 火山引擎 · 豆包流式语音识别",
+      badge: "国内推荐 · 便宜快",
+      key: "豆包语音控制台的 API Key（新版控制台）。插件按官方要求发 <code>X-Api-Key</code>，无需手拼签名。",
+      model: "这里要填<strong>资源 ID</strong>（不是模型名）：<code>volc.seedasr.sauc.duration</code>（2.0 小时版，推荐）、<code>volc.seedasr.sauc.concurrent</code>（2.0 并发版）、<code>volc.bigasr.sauc.duration</code>（1.0 小时版）。",
+      url: "留空即用官方双向流式地址 <code>wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async</code>。",
+      use: "中文直播 / 会议字幕，国内延迟低、按小时计费便宜；长时段直播最划算。",
+      note: "需先在控制台开通「流式语音识别」并保证该资源 ID 已授权；本适配走官方二进制协议（16kHz PCM），分句自动断句。<strong>只识别、不翻译。</strong>"
+    },
+    {
+      t: "xfyun",
+      title: "③ 讯飞 · 实时语音转写（RTASR）",
+      badge: "中文听写",
+      key: "必须填 <strong><code>appid:apiKey</code></strong> 两段（讯飞控制台应用里取，用英文冒号连接）。签名（HMAC-SHA1）由插件自动生成。",
+      model: "填<strong>源语言</strong>：<code>cn</code>（中文 / 中英混合，默认）或 <code>en</code>（英文）。",
+      url: "留空即用官方默认 <code>wss://rtasr.xfyun.cn/v1/ws</code>。",
+      use: "中文会议 / 直播字幕；企业已购买讯飞额度时。",
+      note: "只做听写（不翻译）；控制台需开通「实时语音转写」并配置 <strong>IP 白名单</strong>（保存后约 5 分钟生效）；超过 15 秒不推音频会被服务端断开，插件已按官方 40ms/1280 字节分帧持续推流。"
+    },
+    {
+      t: "glm",
+      title: "④ 智谱 GLM-Realtime",
+      badge: "国内合规",
+      key: "bigmodel.cn 控制台的 API Key。",
+      model: "<code>glm-realtime-flash</code>（更便宜）、<code>glm-realtime</code>、<code>glm-realtime-air</code>。",
+      url: "<code>wss://open.bigmodel.cn/api/paas/v4/realtime</code>（选该服务时已自动填入）。",
+      use: "国内合规要求较高、或已有智谱额度的场景；做字幕请勾选「实时字幕模式」。",
+      note: "走 OpenAI 兼容协议；插件只显示「说话人转写」通道，不会把模型自己的回复当字幕。"
+    },
+    {
+      t: "online",
+      title: "⑤ OpenAI / 其它 OpenAI 兼容在线服务",
+      badge: "多语种",
+      key: "<code>sk-…</code>。",
+      model: "对话/转写：<code>gpt-realtime</code>、<code>gpt-4o-realtime-preview</code>；<strong>纯听录</strong>：<code>gpt-live-transcribe</code>、<code>gpt-realtime-whisper</code>（插件会自动改用新版 GA 听录会话 <code>session.type=transcription</code>）。",
+      url: "<code>wss://api.openai.com/v1/realtime</code>；第三方兼容网关按对方文档填。",
+      use: "英文 / 多语种直播；要中文字幕时勾选「实时字幕模式」（开启输入音频转写通道）。",
+      note: "需能直连 OpenAI（国内一般要中转/代理）；OpenAI 家族会按 24kHz 约定自动上采样，语音不会被拉快。"
+    },
+    {
+      t: "azure",
+      title: "⑥ Azure OpenAI Realtime",
+      badge: "企业 / 合规",
+      key: "Azure 资源的 Key（填到 API Key）。插件识别到 <code>*.openai.azure.com</code> 会自动改发 <code>api-key</code> 头。",
+      model: "填你的<strong>部署名</strong>（deployment），例如 <code>gpt-realtime</code>、<code>gpt-live-transcribe</code>。",
+      url: "<strong>整条粘贴</strong>：<code>wss://&lt;资源名&gt;.openai.azure.com/openai/v1/realtime?model=&lt;部署名&gt;</code>；旧版端点可带 <code>api-version=…&amp;deployment=…</code>（地址里已有 <code>?</code> 时插件不再追加参数）。",
+      use: "企业已有 Azure 额度 / 数据出域合规要求；协议与 OpenAI 完全相同。",
+      note: "不要用 <code>Authorization: Bearer</code>（会被拒，插件已自动换成 <code>api-key</code>）；听录模型同样支持 GA 会话。"
+    },
+    {
+      t: "gemini",
+      title: "⑦ Google Gemini Live API",
+      badge: "含实时翻译",
+      key: "Google AI Studio 的 API Key（插件用 <code>?key=</code> 传入）。",
+      model: "转写：<code>gemini-2.5-flash-live</code>（推荐）、<code>gemini-2.0-flash-live-001</code>；<strong>实时翻译</strong>：<code>gemini-3.5-live-translate-preview</code>（字幕显示译文）。",
+      url: "留空用官方 Live 端点；国内需自建中转（<strong>只换域名、保留路径</strong>）。",
+      use: "多语种实时转写 / 实时翻译，自带增量输出、延迟低。",
+      note: "需要能访问 Google；插件对翻译型模型取译文通道，其余取「说话人转写」通道，不会混入模型自己的话。"
+    },
+    {
+      t: "deepgram",
+      title: "⑧ Deepgram 实时转写",
+      badge: "英文 · 便宜",
+      key: "Deepgram 控制台 API Key（插件发 <code>Authorization: Token &lt;key&gt;</code>）。",
+      model: "<code>nova-3</code>（多语种，默认）、<code>nova-2</code>、<code>enhanced</code>。",
+      url: "<code>wss://api.deepgram.com/v1/listen</code>；要指定语言在地址后加 <code>?language=zh</code>（已写过的参数不会被覆盖）。",
+      use: "英文直播配英文字幕；价格低、延迟低。",
+      note: "<strong>只转写、不翻译</strong>；16kHz PCM、中间结果与断句参数插件已自动带上。"
+    },
+    {
+      t: "assemblyai",
+      title: "⑨ AssemblyAI 实时转写（Streaming v3）",
+      badge: "英文 · 转写",
+      key: "AssemblyAI 控制台 API Key（<strong>只填 key</strong>，插件按 v3 规范发裸 <code>Authorization: &lt;key&gt;</code>）。",
+      model: "<code>universal-streaming-english</code>（默认）、<code>universal-3-5-pro</code>；可留空。",
+      url: "<code>wss://streaming.assemblyai.com/v3/ws</code>。",
+      use: "英文直播、按「轮次(turn)」出字幕。",
+      note: "<strong>只转写、不翻译</strong>；主要面向英语，中文效果有限。"
+    },
+    {
+      t: "funasr",
+      title: "⑩ FunASR 本地流式识别（自部署）",
+      badge: "免费 · 离线",
+      key: "本地服务不需要鉴权，随便填一个非空值即可（例如 <code>local</code>）。",
+      model: "服务端已加载的模型名，可留空：<code>SenseVoiceSmall</code>、<code>fun-asr-nano</code>、<code>paraformer-zh</code>。",
+      url: "<code>ws://127.0.0.1:10095</code>（FunASR 官方 runtime Docker 默认端口）。",
+      use: "中文直播要零成本 / 完全离线；显卡或 CPU 够用的机器上很划算。",
+      note: "需要自己用 Docker 起 FunASR 实时服务；自带 VAD 断句，只返回说话内容。"
+    },
+    {
+      t: "local",
+      title: "⑪ 本机部署 API（OpenAI Realtime 兼容网关）",
+      badge: "离线 / 隐私",
+      key: "本地服务一般无需鉴权，填占位值即可。",
+      model: "取决于你的网关（例如 huggingface/speech-to-speech 的模型名）。",
+      url: "例如 <code>ws://127.0.0.1:8765/v1/realtime</code>（speech-to-speech）或 <code>ws://localhost:11434/v1/realtime</code>（Ollama 系）。",
+      use: "完全离线、数据不出本机；也可把自建 ASR 套一个 Realtime 网关接进来。",
+      note: "勾选「本机网关模式」后字幕直接取 <code>response.text.*</code>（网关通常直接把要显示的文字放这里）。"
+    },
+    {
+      t: "mock",
+      title: "⑫ 模拟模式（不消耗额度）",
+      badge: "调试用",
+      key: "随便填一个非空值（或勾掉校验前先填）。",
+      model: "不用填。",
+      url: "不用填。",
+      use: "第一次配置时先验证「OBS 叠加层 → 字幕样式 → 位置」是否正常，不花一分钱。",
+      note: "输出的是固定示例句，不是真实识别结果。"
+    }
+  ];
+
+  /// 渲染「模型适配说明」弹窗：当前选中的服务高亮并滚动到可视区。
+  function renderModelGuide() {
+    const body = $("guide-body");
+    if (!body) return;
+    const cur = $("provider-type") ? $("provider-type").value : "";
+    const sections = GUIDE_SECTIONS.map((s) => {
+      const hint = PROVIDER_HINTS[s.t] || {};
+      const isCur = s.t === cur;
+      return `<section class="guide-sec${isCur ? " cur" : ""}" data-ptype="${s.t}">
+        <h4>${s.title}${s.badge ? ` <span class="guide-tag">${s.badge}</span>` : ""}${isCur ? ' <span class="guide-now">当前使用</span>' : ""}</h4>
+        <div class="guide-intro">${hint.boxHtml || ""}</div>
+        <ul class="guide-points">
+          <li><b>Key 怎么填</b>：${s.key}</li>
+          <li><b>Model 怎么填</b>：${s.model}</li>
+          <li><b>Base URL</b>：${s.url}</li>
+          <li><b>推荐场景</b>：${s.use}</li>
+          <li><b>注意</b>：${s.note}</li>
+        </ul>
+      </section>`;
+    }).join("");
+    body.innerHTML = `
+      <p class="guide-lead">本插件只能使用<strong>能实时接收语音、边说边返回文字</strong>的<strong>语音（多模态）Realtime</strong>服务。下面按「怎么选 → 每家怎么填」逐一说明；你当前选的服务会高亮显示。</p>
+      <section class="guide-sec guide-quick">
+        <h4>30 秒选择指南</h4>
+        <ul class="guide-points">
+          <li><b>外语直播 → 中文字幕</b>：通义 <code>qwen3.8-livetranslate-flash-realtime</code>（首选）→ Gemini <code>gemini-3.5-live-translate-preview</code> → OpenAI 翻译/听录模型。</li>
+          <li><b>中文直播 → 中文字幕</b>：火山豆包流式识别（便宜快）→ 通义 <code>qwen3-asr-flash-realtime</code> → 本地 FunASR（免费）。</li>
+          <li><b>英文直播 → 英文字幕</b>：Deepgram <code>nova-3</code> / AssemblyAI，价格低、延迟低。</li>
+          <li><b>完全离线 / 数据不出本机</b>：本地 FunASR，或自建 OpenAI-Realtime 兼容网关。</li>
+          <li><b>首次配置先试水</b>：选「模拟模式」，确认叠加层与字幕样式没问题再换真模型。</li>
+        </ul>
+      </section>
+      ${sections}
+      <section class="guide-sec guide-no">
+        <h4>暂不支持 / 不适用的服务</h4>
+        <ul class="guide-points">
+          <li><b>MiniMax、Kimi（Moonshot）、Claude</b>：目前没有开放的实时双向语音接口。</li>
+          <li><b>腾讯云、百度</b>：协议较重（自定义签名 + 加密载荷），暂未适配，需要的话可以再补。</li>
+          <li><b>纯文本 / 纯 TTS / HTTP 上传式 ASR</b>（如 whisper API、filetrans、paraformer 录音文件）：不是实时流，做不出「边说边出」字幕。</li>
+          <li><b>可能后续加</b>：Soniox、Gladia、Speechmatics、ElevenLabs Scribe（协议简单，待实测）。</li>
+        </ul>
+      </section>
+      <p class="guide-foot">提示：换服务后记得点「保存并重启」，管线会用新配置重连。</p>
+    `;
+    const curEl = body.querySelector(".guide-sec.cur");
+    if (curEl) {
+      // 等弹窗显示后再滚动，否则 scrollIntoView 无效。
+      setTimeout(() => curEl.scrollIntoView({ block: "start" }), 0);
+    }
+  }
 
   // ---- 状态 -------------------------------------------------------------
   let currentConfig = null;
@@ -197,9 +453,15 @@
     if (cfg.llm.provider === "qwen-realtime") return "qwen";
     if (cfg.llm.provider === "mock") return "mock";
     if (cfg.llm.provider === "fun-asr-realtime") return "funasr";
+    if (cfg.llm.provider === "gemini-live") return "gemini";
+    if (cfg.llm.provider === "deepgram") return "deepgram";
+    if (cfg.llm.provider === "assemblyai") return "assemblyai";
+    if (cfg.llm.provider === "volc-asr") return "volc";
+    if (cfg.llm.provider === "xfyun-rtasr") return "xfyun";
     if (cfg.llm.provider === "openai-realtime") {
       const ep = cfg.llm.endpoint || "";
       if (ep.includes("bigmodel.cn")) return "glm";
+      if (ep.includes(".azure.com")) return "azure";
       if (ep.includes("localhost") || ep.includes("127.0.0.1")) return "local";
       return "online";
     }
@@ -302,9 +564,6 @@
   function updateProviderUI() {
     const providerType = $("provider-type").value;
     const hint = PROVIDER_HINTS[providerType] || PROVIDER_HINTS.mock;
-    const hintBox = $("provider-hint-box");
-    hintBox.className = "provider-hint-box " + (hint.className || "");
-    hintBox.innerHTML = hint.boxHtml;
 
     $("model").placeholder = hint.modelPlaceholder;
     const dl = $("model-presets");
@@ -322,12 +581,21 @@
     }
 
     const isFunasr = providerType === "funasr";
-    const openaiLike = !isFunasr && ["glm", "online", "local"].includes(providerType);
+    // OpenAI 兼容 realtime 家族（含 GLM / Azure）才有「实时字幕模式」。
+    const openaiLike = ["glm", "online", "local", "azure"].includes(providerType);
     $("transcribe_row").style.display = openaiLike ? "" : "none";
     $("transcription_model_row").style.display =
       openaiLike && $("transcribe").checked ? "" : "none";
     $("gateway_row").style.display = providerType === "local" ? "" : "none";
-    $("low_latency_ms_row").style.display = $("low_latency").checked ? "" : "none";
+    // 「低延迟模式」只对支持手动提交的 provider 有效（qwen / OpenAI 家族）；
+    // Gemini、Deepgram、AssemblyAI 自带增量输出，不显示该开关。
+    const lowLatencyOk = ["qwen", "glm", "online", "local", "azure"].includes(providerType);
+    const lowLatLabel = $("low_latency") && $("low_latency").closest("label");
+    if (lowLatLabel) lowLatLabel.style.display = lowLatencyOk ? "" : "none";
+    $("low_latency_ms_row").style.display =
+      lowLatencyOk && $("low_latency").checked ? "" : "none";
+    // 「模型适配说明」开着时跟随切换高亮（换服务即可看到对应说明）。
+    if ($("guide-modal") && !$("guide-modal").hidden) renderModelGuide();
   }
 
   // ---- 预览样式 --------------------------------------------------------
@@ -742,22 +1010,8 @@
     $("transcribe").addEventListener("change", updateProviderUI);
 
     $("model-guide-btn").addEventListener("click", () => {
-      const modal = $("guide-modal");
-      const body = $("guide-body");
-      body.innerHTML = `
-        <p>本插件只能使用能<strong>实时接收语音、并边听边返回字幕文字</strong>的<strong>语音（多模态）Realtime</strong>模型。</p>
-        <p><strong>云端可用：</strong>通义 Qwen Realtime 语音（同传 / ASR / Qwen-Audio）、智谱 GLM-Realtime、OpenAI Realtime。</p>
-        <p><strong>通义 Qwen 新版已适配：</strong>3.8 同传、3.1 ASR 双工（asr-flash-message / -streaming）、3.1 Realtime Plus、3.8 Omni。其中 3.8 Omni、3.1 Realtime Plus 等需把 Base URL 填成<strong>业务空间专属地址</strong>（<code>wss://&lt;WorkspaceId&gt;.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime</code>）；filetrans 是离线接口，不能做实时字幕。</p>
-        <p><strong>本地 / 自部署可用：</strong></p>
-        <ul>
-          <li><strong>FunASR 流式识别</strong>（SenseVoice / Fun-ASR-Nano / paraformer-zh）：内置通道，默认 <code>ws://127.0.0.1:10095</code>；按 FunASR 官方 runtime 文档起 Docker 即可。</li>
-          <li><strong>huggingface/speech-to-speech</strong>（OpenAI Realtime 兼容网关）：<code>speech-to-speech serve --host 0.0.0.0 --stt parakeet-tdt --enable_live_transcription</code>，端点 <code>ws://&lt;主机IP&gt;:8765/v1/realtime</code>。</li>
-          <li>其它 ASR（faster-whisper / whisper.cpp / Parakeet-TDT / SenseVoice）需套一个 Realtime 网关（同上）。</li>
-        </ul>
-        <p><strong>不可用：</strong>纯文本 / 纯视觉模型、纯语音合成（TTS）、HTTP 上传式 ASR（非实时）。</p>
-        <p><strong>低延迟建议：</strong>中文直播只要中文字幕时，优先用 <strong>ASR 模型</strong>（云端 qwen3-asr-flash-realtime 或本地 FunASR）。</p>
-      `;
-      modal.hidden = false;
+      renderModelGuide();
+      $("guide-modal").hidden = false;
     });
     $("guide-close").addEventListener("click", () => { $("guide-modal").hidden = true; });
     $("guide-modal").addEventListener("click", (e) => {
@@ -809,6 +1063,18 @@
         const ep = (patch.llm.endpoint || "").trim();
         if (!ep) { toast("请填写本机部署 API 的地址", "error"); return; }
         if (!/^ws?:/i.test(ep)) { toast("本机 API 地址必须是 ws:// 开头", "error"); return; }
+      }
+      // 新增的云服务 / 流式转写厂商：地址必须是 WebSocket 形式。
+      if (["azure", "gemini", "deepgram", "assemblyai", "volc", "xfyun"].includes(providerType)) {
+        const ep = (patch.llm.endpoint || "").trim();
+        if (ep && !/^wss?:/i.test(ep)) {
+          toast("Base URL 必须是 WebSocket 地址（wss:// 开头）", "error");
+          return;
+        }
+        if (providerType === "azure" && !ep) {
+          toast("Azure 请整条粘贴 WebSocket 地址（含 api-version / deployment）", "error");
+          return;
+        }
       }
 
       btn.disabled = true;

@@ -702,3 +702,71 @@ body.perf-mode .err-box { background: #1a1d36; }
   body::before,
   body::after { animation: none; }
 }
+
+/* ============================================================
+   「模型适配说明」弹窗内容（各家怎么填 / 推荐模型）
+   ============================================================ */
+.hint.tiny { font-size: 11px; color: var(--text-muted); margin: 8px 0 2px; line-height: 1.5; }
+
+/* 内容较多：弹窗加宽并支持平滑滚动到「当前使用」那一节 */
+.guide-box { width: min(860px, 100%); scroll-behavior: smooth; }
+.guide-modal { padding: 16px; }
+
+.guide-lead { color: var(--text-dim); }
+
+.guide-sec {
+  margin: 14px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.18);
+}
+.guide-sec h4 { margin: 0 0 8px; font-size: 13.5px; color: #cfe0ff; }
+.guide-sec.cur {
+  border-color: var(--accent);
+  background: rgba(108, 140, 255, 0.10);
+  box-shadow: 0 0 0 1px rgba(108, 140, 255, 0.22);
+}
+.guide-sec.guide-quick {
+  border-color: rgba(74, 222, 128, 0.45);
+  background: rgba(74, 222, 128, 0.07);
+}
+.guide-sec.guide-quick h4 { color: #bdf7d3; }
+.guide-sec.guide-no {
+  border-color: rgba(251, 191, 36, 0.40);
+  background: rgba(251, 191, 36, 0.06);
+}
+.guide-sec.guide-no h4 { color: #fde68a; }
+
+.guide-tag,
+.guide-now {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 999px;
+  vertical-align: middle;
+}
+.guide-tag { background: rgba(108, 140, 255, 0.20); color: #cfe0ff; }
+.guide-now { background: rgba(74, 222, 128, 0.22); color: #bdf7d3; font-weight: 700; }
+
+.guide-intro { font-size: 12px; color: rgba(255, 255, 255, 0.86); line-height: 1.6; }
+.guide-points { margin: 8px 0 0; padding-left: 18px; }
+.guide-points li {
+  margin: 5px 0;
+  line-height: 1.62;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 12px;
+}
+.guide-points b { color: #aac4ff; font-weight: 600; }
+.guide-intro code,
+.guide-points code { word-break: break-all; }
+.guide-foot { margin-top: 14px; font-size: 11px; color: var(--text-muted); }
+
+/* 性能模式下这几块的底色换成不透明，避免极光去掉后发灰 */
+body.perf-mode .guide-sec { background: #171b33; }
+body.perf-mode .guide-sec.cur { background: rgba(108, 140, 255, 0.14); }
+
+/* OBS 停靠栏里弹窗窄一点、字号小一点 */
+body.dock .guide-box { width: 100%; }
+body.dock .guide-points li { font-size: 11.5px; }

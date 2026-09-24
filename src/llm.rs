@@ -55,9 +55,56 @@ pub fn build(cfg: &LlmConfig) -> Result<Arc<dyn LlmProvider>> {
         }
         "openai-realtime" => Ok(Arc::new(openai::OpenAiRealtime::new(cfg.clone())?)),
         "fun-asr-realtime" => Ok(Arc::new(funasr::FunAsr::new(cfg.clone())?)),
+        // 第三方实时语音服务
+        "gemini-live" => Ok(Arc::new(gemini::GeminiLive::new(cfg.clone())?)),
+        "deepgram" => Ok(Arc::new(deepgram::DeepgramLive::new(cfg.clone())?)),
+        "assemblyai" => Ok(Arc::new(assemblyai::AssemblyAiLive::new(cfg.clone())?)),
+        // 国内厂商
+        "volc-asr" => Ok(Arc::new(volc::VolcAsr::new(cfg.clone())?)),
+        "xfyun-rtasr" => Ok(Arc::new(xfyun::XfRtasr::new(cfg.clone())?)),
         "mock" => Ok(Arc::new(mock::MockProvider::new(cfg.clone())?) as Arc<dyn LlmProvider>),
         other => Err(anyhow!("unknown LLM provider `{other}`")),
     }
+}
+
+/// 把「累积型」文本（服务端每次都发到目前为稳定的全文）diff 成字幕增量：
+/// 是上一段的延长就只推新增部分；服务器换了一轮就先收尾上一句、再新起一行。
+fn push_cumulative(s: &str, sink: &SubtitleSink, pending: &mut String) {
+    let s = s.trim_end();
+    if s.is_empty() {
+        return;
+    }
+    if s.starts_with(pending.as_str()) {
+        let pc = pending.chars().count();
+        let suffix: String = s.chars().skip(pc).collect();
+        if !suffix.is_empty() {
+            sink.push(SubtitleEvent::Partial(suffix));
+            *pending = s.to_string();
+        }
+    } else if pending.is_empty() {
+        sink.push(SubtitleEvent::Partial(s.to_string()));
+        *pending = s.to_string();
+    } else {
+        sink.push(SubtitleEvent::Final(pending.clone()));
+        *pending = s.to_string();
+        sink.push(SubtitleEvent::Partial(s.to_string()));
+    }
+}
+
+/// 往 WebSocket URL 追加查询参数，但**已经出现过的键不重复添加** ——
+/// 高级用户可以在 Base URL 里手工写 `?language=zh&model=xxx` 覆盖默认值。
+fn with_query_params(url: &str, params: &[(&str, &str)]) -> String {
+    let mut out = url.trim_end_matches(['?', '&']).to_string();
+    for (k, v) in params {
+        if v.is_empty() || out.contains(&format!("{k}=")) {
+            continue;
+        }
+        out.push(if out.contains('?') { '&' } else { '?' });
+        out.push_str(k);
+        out.push('=');
+        out.push_str(v);
+    }
+    out
 }
 
 /// Unwrap a realtime WebSocket handshake failure into a human-readable
@@ -854,6 +901,9 @@ pub mod openai {
     pub struct OpenAiRealtime {
         cfg: LlmConfig,
         endpoint: String,
+        /// Azure OpenAI：鉴权用 `api-key` 头，且 URL 自带 api-version /
+        /// deployment 查询参数（不能再追加 `?model=`）。
+        is_azure: bool,
     }
 
     impl OpenAiRealtime {
@@ -871,7 +921,13 @@ pub mod openai {
                     "Base URL 必须是 WebSocket 地址（wss://...），当前填的是 HTTP 接口：{endpoint}"
                 ));
             }
-            Ok(Self { cfg, endpoint })
+            let lower = endpoint.to_lowercase();
+            let is_azure = lower.contains("openai.azure.com") || lower.contains(".azure.com");
+            Ok(Self {
+                cfg,
+                endpoint,
+                is_azure,
+            })
         }
     }
 
@@ -886,14 +942,28 @@ pub mod openai {
             mut audio_rx: tokio::sync::mpsc::Receiver<Vec<i16>>,
             sink: SubtitleSink,
         ) -> Result<()> {
-            let url = format!("{}?model={}", self.endpoint, self.cfg.model);
+            // Azure 的地址由用户整条粘贴（含 api-version / deployment），
+            // 已经带查询串就不再加 `?model=`；OpenAI 等其它端点按惯例追加模型名。
+            let url = if self.endpoint.contains('?') {
+                self.endpoint.clone()
+            } else {
+                format!("{}?model={}", self.endpoint, self.cfg.model)
+            };
             let mut req = url.into_client_request()?;
-            req.headers_mut().insert(
-                "Authorization",
-                http::HeaderValue::from_str(&format!("Bearer {}", self.cfg.api_key))?,
-            );
-            req.headers_mut()
-                .insert("OpenAI-Beta", http::HeaderValue::from_static("realtime=v1"));
+            if self.is_azure {
+                // Azure：api-key 头；Authorization: Bearer <key> 会被拒。
+                req.headers_mut().insert(
+                    "api-key",
+                    http::HeaderValue::from_str(self.cfg.api_key.trim())?,
+                );
+            } else {
+                req.headers_mut().insert(
+                    "Authorization",
+                    http::HeaderValue::from_str(&format!("Bearer {}", self.cfg.api_key))?,
+                );
+                req.headers_mut()
+                    .insert("OpenAI-Beta", http::HeaderValue::from_static("realtime=v1"));
+            }
 
             let (ws, _) = tokio_tungstenite::connect_async(req)
                 .await
@@ -942,12 +1012,45 @@ pub mod openai {
                 };
                 session_cfg["input_audio_transcription"] = serde_json::json!({ "model": tm });
             }
-            write_half.send(Message::Text(
+            // GA「听录会话」：gpt-live-transcribe / gpt-realtime-whisper 这类
+            // 新模型只在 GA 事件模型下可用 —— session.type = transcription，
+            // 音频配置放在嵌套的 audio.input.*，采样率 24kHz。旧模型
+            // （gpt-realtime / gpt-4o-realtime…）保持上面的 legacy 结构，互不影响。
+            let model_lc = self.cfg.model.to_lowercase();
+            let ga_transcribe = model_lc.contains("live-transcribe")
+                || model_lc.contains("realtime-whisper")
+                || (model_lc.starts_with("gpt-") && model_lc.contains("transcribe"));
+            let session = if ga_transcribe {
+                let tm = if self.cfg.transcription_model.trim().is_empty() {
+                    self.cfg.model.clone()
+                } else {
+                    self.cfg.transcription_model.trim().to_string()
+                };
+                let turn = if segment_ms > 0 {
+                    // 低延迟：手动提交（none），由本机按段 commit。
+                    serde_json::json!({ "type": "none" })
+                } else {
+                    serde_json::json!({ "type": "server_vad" })
+                };
+                serde_json::json!({
+                    "type": "session.update",
+                    "session": {
+                        "type": "transcription",
+                        "audio": {
+                            "input": {
+                                "format": { "type": "audio/pcm", "rate": 24000 },
+                                "transcription": { "model": tm },
+                                "turn_detection": turn
+                            }
+                        }
+                    }
+                })
+            } else {
                 serde_json::json!({ "type": "session.update", "session": session_cfg })
-                    .to_string()
-                    .into(),
-            ))
-            .await?;
+            };
+            write_half
+                .send(Message::Text(session.to_string().into()))
+                .await?;
 
             let read = {
                 let sink = sink.clone();
@@ -985,6 +1088,11 @@ pub mod openai {
             };
 
             let write = async move {
+                // OpenAI / Azure realtime 的 pcm16 约定为 24kHz，而本机管线交给
+                // provider 的是 16kHz；不上采样会被服务端按 24k 解释（语速×1.5、
+                // 识别率明显下降）。这里对 OpenAI 家族做一次 16k→24k 上采样。
+                let upsample = self.is_azure
+                    || self.endpoint.to_lowercase().contains("api.openai.com");
                 // 分段 commit（低延迟用）。只提交音频缓冲区：字幕走的是「说话人转写」
                 // 通道，不发送 response.create —— 那会触发模型生成 AI 回复，
                 // 字幕就会变成 AI 的自言自语。
@@ -1024,8 +1132,14 @@ pub mod openai {
                         }
                     }
 
-                    let mut bytes = Vec::with_capacity(chunk.len() * 2);
-                    for s in &chunk {
+                    // 需要时先上采样到 24kHz 再编码（上面算毫秒用的是原始 16k 数据）。
+                    let pcm: Vec<i16> = if upsample {
+                        crate::audio::resample_mono(&chunk, 16_000, 24_000)
+                    } else {
+                        chunk.clone()
+                    };
+                    let mut bytes = Vec::with_capacity(pcm.len() * 2);
+                    for s in &pcm {
                         bytes.extend_from_slice(&s.to_le_bytes());
                     }
                     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
@@ -1302,6 +1416,948 @@ pub mod mock {
                 i += 1;
             }
             Ok(())
+        }
+    }
+}
+
+// ---------- Google Gemini Live API ----------
+
+pub mod gemini {
+    use super::*;
+
+    const DEFAULT_ENDPOINT: &str = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
+    const DEFAULT_MODEL: &str = "gemini-2.5-flash-live";
+
+    pub struct GeminiLive {
+        cfg: LlmConfig,
+        endpoint: String,
+    }
+
+    impl GeminiLive {
+        pub fn new(cfg: LlmConfig) -> Result<Self> {
+            let endpoint = cfg
+                .endpoint
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| DEFAULT_ENDPOINT.to_string());
+            if cfg.api_key.trim().is_empty() {
+                return Err(anyhow!(
+                    "Gemini API Key 为空：请在管理面板填入 Google AI Studio 的 API Key"
+                ));
+            }
+            Ok(Self { cfg, endpoint })
+        }
+
+        /// 模型名必须是 Live 系列；用户可能沿用了别的 provider 的模型名。
+        fn resolved_model(&self) -> String {
+            let m = self.cfg.model.trim();
+            if m.to_lowercase().starts_with("gemini") {
+                if m.starts_with("models/") {
+                    m.to_string()
+                } else {
+                    format!("models/{m}")
+                }
+            } else {
+                warn!(model = %m, "not a gemini live model; falling back to {DEFAULT_MODEL}");
+                format!("models/{DEFAULT_MODEL}")
+            }
+        }
+    }
+
+    #[async_trait]
+    impl LlmProvider for GeminiLive {
+        fn name(&self) -> &'static str {
+            "gemini-live"
+        }
+
+        async fn run(
+            self: Arc<Self>,
+            mut audio_rx: tokio::sync::mpsc::Receiver<Vec<i16>>,
+            sink: SubtitleSink,
+        ) -> Result<()> {
+            // Live API 用 ?key=<api_key> 鉴权（Google AI Studio）。
+            let url = with_query_params(&self.endpoint, &[("key", self.cfg.api_key.trim())]);
+            let req = url.into_client_request()?;
+            let (ws, _) = tokio_tungstenite::connect_async(req)
+                .await
+                .map_err(|e| ws_connect_error(e, "连接 Gemini Live API"))?;
+            let (mut write_half, mut read_half) = ws.split();
+
+            // setup：只要文本输出（本插件只做字幕，不需要 TTS 音频），
+            // 并打开「说话人转写」通道。
+            let mut setup = serde_json::json!({
+                "model": self.resolved_model(),
+                "generationConfig": { "responseModalities": ["TEXT"] },
+                "inputAudioTranscription": {},
+            });
+            if let Some(p) = self
+                .cfg
+                .system_prompt
+                .as_deref()
+                .filter(|p| !p.trim().is_empty())
+            {
+                setup["systemInstruction"] = serde_json::json!({ "parts": [{ "text": p }] });
+            }
+            write_half
+                .send(Message::Text(
+                    serde_json::json!({ "setup": setup }).to_string().into(),
+                ))
+                .await?;
+            info!(model = %self.cfg.model, "gemini live session opened");
+
+            // 翻译型 Live 模型（…live-translate…）的译文走 outputTranscription；
+            // 其余模型只做「说话人转写」，两者互斥以免字幕混入模型自己的话。
+            let show_output = self.cfg.model.to_lowercase().contains("translate");
+
+            let read = {
+                let sink = sink.clone();
+                async move {
+                    let mut pending = String::new();
+                    while let Some(msg) = read_half.next().await {
+                        let Ok(msg) = msg else { break };
+                        let text = match msg {
+                            Message::Text(t) => t.to_string(),
+                            Message::Binary(b) => String::from_utf8_lossy(&b).to_string(),
+                            _ => continue,
+                        };
+                        let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
+                            debug!(payload = %text, "unparsed gemini event");
+                            continue;
+                        };
+                        if let Some(sc) = v.get("serverContent") {
+                            if show_output {
+                                if let Some(t) = sc
+                                    .pointer("/outputTranscription/text")
+                                    .and_then(|s| s.as_str())
+                                {
+                                    push_cumulative(t, &sink, &mut pending);
+                                }
+                            } else if let Some(t) = sc
+                                .pointer("/inputTranscription/text")
+                                .and_then(|s| s.as_str())
+                            {
+                                // Gemini 的输入转写是「增量片段」。
+                                if !t.trim().is_empty() {
+                                    sink.push(SubtitleEvent::Partial(t.to_string()));
+                                    pending.push_str(t);
+                                }
+                            }
+                            if sc.get("interrupted").and_then(|b| b.as_bool()) == Some(true) {
+                                pending.clear();
+                            }
+                            if sc.get("turnComplete").and_then(|b| b.as_bool()) == Some(true) {
+                                if !pending.trim().is_empty() {
+                                    sink.push(SubtitleEvent::Final(pending.trim().to_string()));
+                                }
+                                pending.clear();
+                            }
+                        } else if v.get("goAway").is_some() {
+                            warn!("gemini 会话即将被服务端关闭（goAway）");
+                        } else if v.get("error").is_some() {
+                            warn!(payload = %text, "gemini error event");
+                        }
+                    }
+                }
+            };
+
+            let write = async move {
+                let mut bytes: Vec<u8> = Vec::new();
+                while let Some(chunk) = audio_rx.recv().await {
+                    if chunk.is_empty() {
+                        continue;
+                    }
+                    bytes.clear();
+                    bytes.reserve(chunk.len() * 2);
+                    for s in &chunk {
+                        bytes.extend_from_slice(&s.to_le_bytes());
+                    }
+                    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                    let msg = serde_json::json!({
+                        "realtimeInput": {
+                            "audio": { "mimeType": "audio/pcm;rate=16000", "data": b64 }
+                        }
+                    });
+                    if write_half
+                        .send(Message::Text(msg.to_string().into()))
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                let _ = write_half
+                    .send(Message::Text(
+                        serde_json::json!({ "realtimeInput": { "audioStreamEnd": true } })
+                            .to_string()
+                            .into(),
+                    ))
+                    .await;
+                let _ = write_half.close().await;
+            };
+
+            tokio::select! {
+                _ = read => {}
+                _ = write => {}
+            }
+            Ok(())
+        }
+    }
+}
+
+// ---------- Deepgram（实时流式转写） ----------
+
+pub mod deepgram {
+    use super::*;
+
+    const DEFAULT_ENDPOINT: &str = "wss://api.deepgram.com/v1/listen";
+
+    pub struct DeepgramLive {
+        cfg: LlmConfig,
+        endpoint: String,
+    }
+
+    impl DeepgramLive {
+        pub fn new(cfg: LlmConfig) -> Result<Self> {
+            let endpoint = cfg
+                .endpoint
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| DEFAULT_ENDPOINT.to_string());
+            if cfg.api_key.trim().is_empty() {
+                return Err(anyhow!("Deepgram API Key 为空：请在管理面板填写"));
+            }
+            Ok(Self { cfg, endpoint })
+        }
+
+        /// 只接受 Deepgram 的模型名，避免沿用其它 provider 的模型导致 400。
+        fn resolved_model(&self) -> String {
+            let m = self.cfg.model.trim();
+            let lc = m.to_lowercase();
+            if lc.starts_with("nova") || lc.contains("whisper") || lc.contains("flux") {
+                m.to_string()
+            } else {
+                "nova-3".to_string()
+            }
+        }
+    }
+
+    #[async_trait]
+    impl LlmProvider for DeepgramLive {
+        fn name(&self) -> &'static str {
+            "deepgram"
+        }
+
+        async fn run(
+            self: Arc<Self>,
+            mut audio_rx: tokio::sync::mpsc::Receiver<Vec<i16>>,
+            sink: SubtitleSink,
+        ) -> Result<()> {
+            // 16kHz 单声道 PCM。语言交给 Deepgram 自动识别；想指定语言
+            // 可以直接在 Base URL 里写 `?language=zh`（已存在的键不再覆盖）。
+            let model = self.resolved_model();
+            let url = with_query_params(
+                &self.endpoint,
+                &[
+                    ("model", model.as_str()),
+                    ("encoding", "linear16"),
+                    ("sample_rate", "16000"),
+                    ("channels", "1"),
+                    ("interim_results", "true"),
+                    ("punctuate", "true"),
+                    ("smart_format", "true"),
+                    ("endpointing", "300"),
+                ],
+            );
+            let mut req = url.into_client_request()?;
+            // Deepgram 用 `Token <key>`（不是 Bearer）。
+            req.headers_mut().insert(
+                "Authorization",
+                http::HeaderValue::from_str(&format!("Token {}", self.cfg.api_key.trim()))?,
+            );
+            let (ws, _) = tokio_tungstenite::connect_async(req)
+                .await
+                .map_err(|e| ws_connect_error(e, "连接 Deepgram 实时转写"))?;
+            let (mut write_half, mut read_half) = ws.split();
+            info!("deepgram live session opened");
+
+            let read = {
+                let sink = sink.clone();
+                async move {
+                    let mut pending = String::new();
+                    while let Some(msg) = read_half.next().await {
+                        let Ok(msg) = msg else { break };
+                        let Message::Text(t) = msg else { continue };
+                        let Ok(v) = serde_json::from_str::<serde_json::Value>(&t) else {
+                            debug!(payload = %t, "unparsed deepgram event");
+                            continue;
+                        };
+                        match v.get("type").and_then(|s| s.as_str()).unwrap_or("") {
+                            "Results" => {
+                                let transcript = v
+                                    .pointer("/channel/alternatives/0/transcript")
+                                    .and_then(|s| s.as_str())
+                                    .unwrap_or("");
+                                let is_final = v
+                                    .get("is_final")
+                                    .and_then(|b| b.as_bool())
+                                    .unwrap_or(false);
+                                if is_final {
+                                    // 该分句定型：收尾进历史，清空当前行。
+                                    if !transcript.trim().is_empty() {
+                                        sink.push(SubtitleEvent::Final(
+                                            transcript.trim().to_string(),
+                                        ));
+                                    }
+                                    pending.clear();
+                                } else {
+                                    // 中间结果是「本分句到目前为止」的全文 → 取增量。
+                                    push_cumulative(transcript, &sink, &mut pending);
+                                }
+                            }
+                            "UtteranceEnd" => {
+                                if !pending.trim().is_empty() {
+                                    sink.push(SubtitleEvent::Final(pending.trim().to_string()));
+                                }
+                                pending.clear();
+                            }
+                            "Close" => break,
+                            "error" => warn!(payload = %t, "deepgram error event"),
+                            _ => {}
+                        }
+                    }
+                }
+            };
+
+            let write = async move {
+                while let Some(chunk) = audio_rx.recv().await {
+                    if chunk.is_empty() {
+                        continue;
+                    }
+                    let mut bytes = Vec::with_capacity(chunk.len() * 2);
+                    for s in &chunk {
+                        bytes.extend_from_slice(&s.to_le_bytes());
+                    }
+                    if write_half.send(Message::Binary(bytes.into())).await.is_err() {
+                        break;
+                    }
+                }
+                let _ = write_half
+                    .send(Message::Text(
+                        serde_json::json!({ "type": "CloseStream" })
+                            .to_string()
+                            .into(),
+                    ))
+                    .await;
+                let _ = write_half.close().await;
+            };
+
+            tokio::select! {
+                _ = read => {}
+                _ = write => {}
+            }
+            Ok(())
+        }
+    }
+}
+
+// ---------- AssemblyAI（实时流式转写 v3） ----------
+
+pub mod assemblyai {
+    use super::*;
+
+    const DEFAULT_ENDPOINT: &str = "wss://streaming.assemblyai.com/v3/ws";
+
+    pub struct AssemblyAiLive {
+        cfg: LlmConfig,
+        endpoint: String,
+    }
+
+    impl AssemblyAiLive {
+        pub fn new(cfg: LlmConfig) -> Result<Self> {
+            let endpoint = cfg
+                .endpoint
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| DEFAULT_ENDPOINT.to_string());
+            if cfg.api_key.trim().is_empty() {
+                return Err(anyhow!("AssemblyAI API Key 为空：请在管理面板填写"));
+            }
+            Ok(Self { cfg, endpoint })
+        }
+
+        /// assemblyai 的 speech_model 形如 universal-streaming-english /
+        /// universal-3-5-pro；沿用别的 provider 的模型名会被拒，故做白名单。
+        fn resolved_model(&self) -> Option<String> {
+            let m = self.cfg.model.trim();
+            let lc = m.to_lowercase();
+            if lc.contains("universal") || lc.contains("slam") {
+                Some(m.to_string())
+            } else {
+                None
+            }
+        }
+    }
+
+    #[async_trait]
+    impl LlmProvider for AssemblyAiLive {
+        fn name(&self) -> &'static str {
+            "assemblyai"
+        }
+
+        async fn run(
+            self: Arc<Self>,
+            mut audio_rx: tokio::sync::mpsc::Receiver<Vec<i16>>,
+            sink: SubtitleSink,
+        ) -> Result<()> {
+            let mut params: Vec<(&str, &str)> = vec![
+                ("sample_rate", "16000"),
+                ("format_turns", "true"),
+            ];
+            let model = self.resolved_model();
+            if let Some(m) = model.as_deref() {
+                params.push(("speech_model", m));
+            }
+            let url = with_query_params(&self.endpoint, &params);
+            let mut req = url.into_client_request()?;
+            // v3 用**裸 key**（没有 Bearer 前缀）。
+            req.headers_mut().insert(
+                "Authorization",
+                http::HeaderValue::from_str(self.cfg.api_key.trim())?,
+            );
+            let (ws, _) = tokio_tungstenite::connect_async(req)
+                .await
+                .map_err(|e| ws_connect_error(e, "连接 AssemblyAI 实时转写"))?;
+            let (mut write_half, mut read_half) = ws.split();
+            info!("assemblyai live session opened");
+
+            let read = {
+                let sink = sink.clone();
+                async move {
+                    let mut pending = String::new();
+                    while let Some(msg) = read_half.next().await {
+                        let Ok(msg) = msg else { break };
+                        let Message::Text(t) = msg else { continue };
+                        let Ok(v) = serde_json::from_str::<serde_json::Value>(&t) else {
+                            debug!(payload = %t, "unparsed assemblyai event");
+                            continue;
+                        };
+                        match v.get("type").and_then(|s| s.as_str()).unwrap_or("") {
+                            "Turn" => {
+                                let transcript = v
+                                    .get("transcript")
+                                    .and_then(|s| s.as_str())
+                                    .unwrap_or("");
+                                let end_of_turn = v
+                                    .get("end_of_turn")
+                                    .and_then(|b| b.as_bool())
+                                    .unwrap_or(false);
+                                if end_of_turn {
+                                    if !transcript.trim().is_empty() {
+                                        sink.push(SubtitleEvent::Final(
+                                            transcript.trim().to_string(),
+                                        ));
+                                    }
+                                    pending.clear();
+                                } else {
+                                    // 一个 turn 内的文字是累积的 → 取增量。
+                                    push_cumulative(transcript, &sink, &mut pending);
+                                }
+                            }
+                            "Termination" => break,
+                            "error" => warn!(payload = %t, "assemblyai error event"),
+                            _ => {}
+                        }
+                    }
+                }
+            };
+
+            let write = async move {
+                while let Some(chunk) = audio_rx.recv().await {
+                    if chunk.is_empty() {
+                        continue;
+                    }
+                    let mut bytes = Vec::with_capacity(chunk.len() * 2);
+                    for s in &chunk {
+                        bytes.extend_from_slice(&s.to_le_bytes());
+                    }
+                    if write_half.send(Message::Binary(bytes.into())).await.is_err() {
+                        break;
+                    }
+                }
+                let _ = write_half
+                    .send(Message::Text(
+                        serde_json::json!({ "type": "Terminate" }).to_string().into(),
+                    ))
+                    .await;
+                let _ = write_half.close().await;
+            };
+
+            tokio::select! {
+                _ = read => {}
+                _ = write => {}
+            }
+            Ok(())
+        }
+    }
+}
+
+// ---------- 火山引擎 · 豆包流式语音识别（自有二进制协议） ----------
+
+pub mod volc {
+    use super::*;
+    use std::io::{Read, Write};
+
+    const DEFAULT_ENDPOINT: &str = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async";
+    /// 2.0 小时版（推荐）。Model 字段填 `volc.` 开头的资源 ID 可覆盖，
+    /// 例如 volc.seedasr.sauc.concurrent（并发版）/ volc.bigasr.sauc.duration（1.0）。
+    const DEFAULT_RESOURCE_ID: &str = "volc.seedasr.sauc.duration";
+
+    // 4 字节头：版本+头长 / 类型+flags / 序列化+压缩 / 保留
+    const PROTO: u8 = 0x11;
+    const MSG_FULL_CLIENT: u8 = 0x1;
+    const MSG_AUDIO_ONLY: u8 = 0x2;
+    const MSG_FULL_SERVER: u8 = 0x9;
+    const MSG_ERROR: u8 = 0xF;
+    const FLAG_NONE: u8 = 0x0;
+    const FLAG_LAST: u8 = 0x2; // 最后一包（无序号）
+    const SER_JSON_GZIP: u8 = 0x11;
+    const SER_RAW_NONE: u8 = 0x00;
+    const COMP_GZIP: u8 = 0x1;
+
+    fn gzip(data: &[u8]) -> Vec<u8> {
+        let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        if enc.write_all(data).is_err() {
+            return data.to_vec();
+        }
+        enc.finish().unwrap_or_else(|_| data.to_vec())
+    }
+
+    fn gunzip(data: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut dec = flate2::read::GzDecoder::new(data);
+        if dec.read_to_end(&mut out).is_err() {
+            return data.to_vec();
+        }
+        out
+    }
+
+    /// 组一帧：`[0x11, 类型<<4|flags, 序列化<<4|压缩, 0x00, 长度(大端 u32), payload]`
+    fn frame(msg_type: u8, flags: u8, ser_comp: u8, payload: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(8 + payload.len());
+        out.extend_from_slice(&[PROTO, (msg_type << 4) | flags, ser_comp, 0x00]);
+        out.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+        out.extend_from_slice(payload);
+        out
+    }
+
+    /// 解析服务端帧 → (消息类型, 压缩方式, payload)
+    fn parse_frame(buf: &[u8]) -> Option<(u8, u8, Vec<u8>)> {
+        if buf.len() < 8 {
+            return None;
+        }
+        let msg_type = buf[1] >> 4;
+        let compression = buf[2] & 0x0F;
+        let size = u32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]) as usize;
+        let payload = buf.get(8..8 + size)?.to_vec();
+        Some((msg_type, compression, payload))
+    }
+
+    pub struct VolcAsr {
+        cfg: LlmConfig,
+        endpoint: String,
+    }
+
+    impl VolcAsr {
+        pub fn new(cfg: LlmConfig) -> Result<Self> {
+            let endpoint = cfg
+                .endpoint
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| DEFAULT_ENDPOINT.to_string());
+            if cfg.api_key.trim().is_empty() {
+                return Err(anyhow!(
+                    "火山引擎 API Key 为空：请在管理面板填写豆包语音控制台的 API Key"
+                ));
+            }
+            Ok(Self { cfg, endpoint })
+        }
+
+        fn resource_id(&self) -> String {
+            let m = self.cfg.model.trim();
+            if m.starts_with("volc.") {
+                m.to_string()
+            } else {
+                DEFAULT_RESOURCE_ID.to_string()
+            }
+        }
+    }
+
+    #[async_trait]
+    impl LlmProvider for VolcAsr {
+        fn name(&self) -> &'static str {
+            "volc-asr"
+        }
+
+        async fn run(
+            self: Arc<Self>,
+            mut audio_rx: tokio::sync::mpsc::Receiver<Vec<i16>>,
+            sink: SubtitleSink,
+        ) -> Result<()> {
+            let mut req = self.endpoint.clone().into_client_request()?;
+            let rid = uuid::Uuid::new_v4().to_string();
+            let cid = uuid::Uuid::new_v4().to_string();
+            {
+                let h = req.headers_mut();
+                h.insert(
+                    "X-Api-Key",
+                    http::HeaderValue::from_str(self.cfg.api_key.trim())?,
+                );
+                h.insert(
+                    "X-Api-Resource-Id",
+                    http::HeaderValue::from_str(&self.resource_id())?,
+                );
+                h.insert("X-Api-Request-Id", http::HeaderValue::from_str(&rid)?);
+                h.insert("X-Api-Connect-Id", http::HeaderValue::from_str(&cid)?);
+            }
+            let (ws, _) = tokio_tungstenite::connect_async(req)
+                .await
+                .map_err(|e| ws_connect_error(e, "连接火山引擎豆包 ASR"))?;
+            let (mut write_half, mut read_half) = ws.split();
+
+            // 首包：完整请求（gzip 的 JSON 配置）。
+            let cfg_json = serde_json::json!({
+                "user": { "uid": "stream-live-translate" },
+                "audio": { "format": "pcm", "codec": "raw", "rate": 16000, "bits": 16, "channel": 1 },
+                "request": {
+                    "model_name": "bigmodel",
+                    "enable_itn": true,
+                    "enable_punc": true,
+                    "show_utterances": true,
+                    "result_type": "single"
+                }
+            });
+            let first = frame(
+                MSG_FULL_CLIENT,
+                FLAG_NONE,
+                SER_JSON_GZIP,
+                &gzip(cfg_json.to_string().as_bytes()),
+            );
+            write_half.send(Message::Binary(first.into())).await?;
+            info!(endpoint = %self.endpoint, "volcengine 豆包 ASR 会话已建立");
+
+            let read = {
+                let sink = sink.clone();
+                async move {
+                    let mut pending = String::new();
+                    while let Some(msg) = read_half.next().await {
+                        let Ok(msg) = msg else { break };
+                        let Message::Binary(b) = msg else { continue };
+                        let Some((mt, comp, payload)) = parse_frame(&b) else {
+                            continue;
+                        };
+                        if mt == MSG_ERROR {
+                            warn!(
+                                payload = %String::from_utf8_lossy(&payload),
+                                "volcengine error frame"
+                            );
+                            continue;
+                        }
+                        if mt != MSG_FULL_SERVER {
+                            continue;
+                        }
+                        let raw = if comp == COMP_GZIP {
+                            gunzip(&payload)
+                        } else {
+                            payload
+                        };
+                        let text = String::from_utf8_lossy(&raw).to_string();
+                        let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
+                            debug!(payload = %text, "unparsed volcengine payload");
+                            continue;
+                        };
+                        apply_volc(&v, &sink, &mut pending);
+                        if v.get("is_last_package").and_then(|b| b.as_bool()) == Some(true) {
+                            break;
+                        }
+                    }
+                }
+            };
+
+            let write = async move {
+                while let Some(chunk) = audio_rx.recv().await {
+                    if chunk.is_empty() {
+                        continue;
+                    }
+                    let mut bytes = Vec::with_capacity(chunk.len() * 2);
+                    for s in &chunk {
+                        bytes.extend_from_slice(&s.to_le_bytes());
+                    }
+                    // 音频帧用「不做序列化、不压缩」，避免每包都 gzip 的 CPU 开销。
+                    let f = frame(MSG_AUDIO_ONLY, FLAG_NONE, SER_RAW_NONE, &bytes);
+                    if write_half.send(Message::Binary(f.into())).await.is_err() {
+                        break;
+                    }
+                }
+                // 最后一包：flags=0b0010 表示音频结束。
+                let last = frame(MSG_AUDIO_ONLY, FLAG_LAST, SER_RAW_NONE, &[]);
+                let _ = write_half.send(Message::Binary(last.into())).await;
+                let _ = write_half.close().await;
+            };
+
+            tokio::select! {
+                _ = read => {}
+                _ = write => {}
+            }
+            Ok(())
+        }
+    }
+
+    /// 解析识别结果：优先用分句 `utterances`（`definite` 标记定稿），
+    /// 没有分句信息时退回整段 `result.text` 做前缀差分。
+    fn apply_volc(v: &serde_json::Value, sink: &SubtitleSink, pending: &mut String) {
+        let result = v.get("payload_msg").unwrap_or(v).get("result");
+        if let Some(uts) = result
+            .and_then(|r| r.get("utterances"))
+            .and_then(|u| u.as_array())
+        {
+            for u in uts {
+                let text = u.get("text").and_then(|s| s.as_str()).unwrap_or("");
+                if text.trim().is_empty() {
+                    continue;
+                }
+                let definite = match u.get("definite") {
+                    Some(serde_json::Value::Bool(b)) => *b,
+                    Some(serde_json::Value::String(s)) => s == "true",
+                    _ => false,
+                };
+                if definite {
+                    sink.push(SubtitleEvent::Final(text.trim().to_string()));
+                    pending.clear();
+                } else {
+                    push_cumulative(text, sink, pending);
+                }
+            }
+            return;
+        }
+        if let Some(t) = result
+            .and_then(|r| r.get("text"))
+            .and_then(|s| s.as_str())
+        {
+            push_cumulative(t, sink, pending);
+        }
+    }
+}
+
+// ---------- 讯飞 · 实时语音转写（RTASR） ----------
+
+pub mod xfyun {
+    use super::*;
+    use hmac::{Hmac, Mac};
+    use md5::{Digest, Md5};
+    use sha1::Sha1;
+
+    const DEFAULT_ENDPOINT: &str = "wss://rtasr.xfyun.cn/v1/ws";
+
+    fn url_encode(s: &str) -> String {
+        let mut out = String::with_capacity(s.len() + 8);
+        for b in s.bytes() {
+            match b {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                    out.push(b as char)
+                }
+                _ => out.push_str(&format!("%{b:02X}")),
+            }
+        }
+        out
+    }
+
+    pub struct XfRtasr {
+        cfg: LlmConfig,
+        endpoint: String,
+    }
+
+    impl XfRtasr {
+        pub fn new(cfg: LlmConfig) -> Result<Self> {
+            let endpoint = cfg
+                .endpoint
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| DEFAULT_ENDPOINT.to_string());
+            let key = cfg.api_key.trim();
+            if key.is_empty() {
+                return Err(anyhow!("讯飞 API Key 为空：请在管理面板填写"));
+            }
+            if !key.contains(':') {
+                return Err(anyhow!(
+                    "讯飞实时语音转写需要「appid + apiKey」两段，请把 API Key 填成 `appid:apiKey` 的形式（在讯飞控制台应用里取）"
+                ));
+            }
+            Ok(Self { cfg, endpoint })
+        }
+
+        /// Model 字段当「源语言」用：`en` = 英文，其余按 `cn`（中文/中英混合）。
+        fn lang(&self) -> &'static str {
+            if self.cfg.model.trim().eq_ignore_ascii_case("en") {
+                "en"
+            } else {
+                "cn"
+            }
+        }
+    }
+
+    #[async_trait]
+    impl LlmProvider for XfRtasr {
+        fn name(&self) -> &'static str {
+            "xfyun-rtasr"
+        }
+
+        async fn run(
+            self: Arc<Self>,
+            mut audio_rx: tokio::sync::mpsc::Receiver<Vec<i16>>,
+            sink: SubtitleSink,
+        ) -> Result<()> {
+            let Some((appid, api_key)) = self.cfg.api_key.trim().split_once(':') else {
+                return Err(anyhow!("讯飞 API Key 需要 `appid:apiKey` 形式"));
+            };
+            let ts = chrono::Utc::now().timestamp().to_string();
+            // signa = Base64( HmacSHA1( MD5(appid + ts), apiKey ) )
+            let mut md5 = Md5::new();
+            md5.update(format!("{appid}{ts}").as_bytes());
+            let md5_hex = hex::encode(md5.finalize());
+            let mut mac = Hmac::<Sha1>::new_from_slice(api_key.as_bytes())
+                .map_err(|e| anyhow!("HMAC 初始化失败：{e}"))?;
+            mac.update(md5_hex.as_bytes());
+            let signa =
+                base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes());
+
+            let lang = self.lang();
+            let signa_enc = url_encode(&signa);
+            let url = with_query_params(
+                &self.endpoint,
+                &[
+                    ("appid", appid),
+                    ("ts", ts.as_str()),
+                    ("signa", signa_enc.as_str()),
+                    ("lang", lang),
+                ],
+            );
+            let req = url.into_client_request()?;
+            let (ws, _) = tokio_tungstenite::connect_async(req)
+                .await
+                .map_err(|e| ws_connect_error(e, "连接讯飞实时语音转写"))?;
+            let (mut write_half, mut read_half) = ws.split();
+            info!(lang = lang, "讯飞 RTASR 会话已建立");
+
+            let read = {
+                let sink = sink.clone();
+                async move {
+                    let mut pending = String::new();
+                    while let Some(msg) = read_half.next().await {
+                        let Ok(msg) = msg else { break };
+                        let Message::Text(t) = msg else { continue };
+                        let Ok(v) = serde_json::from_str::<serde_json::Value>(&t) else {
+                            continue;
+                        };
+                        match v.get("action").and_then(|s| s.as_str()).unwrap_or("") {
+                            "result" => {
+                                if let Some(data) = v.get("data").and_then(|s| s.as_str()) {
+                                    apply_xfyun(data.trim(), &sink, &mut pending);
+                                }
+                            }
+                            "error" => warn!(payload = %t, "讯飞 error 事件"),
+                            "started" => info!("讯飞 RTASR 握手成功"),
+                            _ => {}
+                        }
+                    }
+                }
+            };
+
+            let write = async move {
+                // 讯飞要求 40ms/1280 字节一组（16k 单声道 = 640 个采样）。
+                const SAMPLES_PER_FRAME: usize = 640;
+                'pump: while let Some(chunk) = audio_rx.recv().await {
+                    if chunk.is_empty() {
+                        continue;
+                    }
+                    for part in chunk.chunks(SAMPLES_PER_FRAME) {
+                        let mut bytes = Vec::with_capacity(part.len() * 2);
+                        for s in part {
+                            bytes.extend_from_slice(&s.to_le_bytes());
+                        }
+                        if write_half.send(Message::Binary(bytes.into())).await.is_err() {
+                            break 'pump;
+                        }
+                    }
+                }
+                // 结束标志：一个承载 `{"end": true}` 的二进制帧。
+                let _ = write_half
+                    .send(Message::Binary(br#"{"end": true}"#.to_vec().into()))
+                    .await;
+                let _ = write_half.close().await;
+            };
+
+            tokio::select! {
+                _ = read => {}
+                _ = write => {}
+            }
+            Ok(())
+        }
+    }
+
+    /// 解析讯飞结果：`data` 是二次编码的 JSON 字符串。
+    ///   * 听写：`{ "cn": { "st": { "type": "0|1", "rt": [ { "ws": [ { "cw": [ {"w": "字"} ] } ] } ] } } }`
+    ///   * 翻译：`{ "biz": "trans", "dst": "译文", "type": 0|1 }`
+    fn apply_xfyun(data: &str, sink: &SubtitleSink, pending: &mut String) {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(data) else {
+            return;
+        };
+        let ty = match v.get("type") {
+            Some(serde_json::Value::String(s)) => s.clone(),
+            Some(serde_json::Value::Number(n)) => n.to_string(),
+            _ => String::new(),
+        };
+        // 翻译结果（开启 transType / targetLang 时使用）。
+        if v.get("biz").and_then(|s| s.as_str()) == Some("trans") {
+            let text = v.get("dst").and_then(|s| s.as_str()).unwrap_or("");
+            if text.trim().is_empty() {
+                return;
+            }
+            if ty == "0" {
+                sink.push(SubtitleEvent::Final(text.trim().to_string()));
+                pending.clear();
+            } else {
+                push_cumulative(text, sink, pending);
+            }
+            return;
+        }
+        // 听写结果：把词序列拼成整句。
+        let Some(st) = v.get("cn").and_then(|c| c.get("st")) else {
+            return;
+        };
+        let mut text = String::new();
+        if let Some(rt) = st.get("rt").and_then(|r| r.as_array()) {
+            for seg in rt {
+                if let Some(ws) = seg.get("ws").and_then(|w| w.as_array()) {
+                    for w in ws {
+                        if let Some(cw) = w.get("cw").and_then(|c| c.as_array()) {
+                            if let Some(t) =
+                                cw.first().and_then(|c| c.get("w")).and_then(|s| s.as_str())
+                            {
+                                text.push_str(t);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if text.trim().is_empty() {
+            return;
+        }
+        if ty == "0" {
+            sink.push(SubtitleEvent::Final(text.trim().to_string()));
+            pending.clear();
+        } else {
+            push_cumulative(&text, sink, pending);
         }
     }
 }
