@@ -1,95 +1,80 @@
-# 使用指南
+# 直播译站（Stream Live Translate）使用教程
 
-> v0.0.6.1 起推荐使用 **OBS 插件模式**（复制插件文件夹到 OBS 插件目录，音频直接从 OBS 媒体源内部采集）：
-> 安装和使用步骤见 [docs/PLUGIN.md](PLUGIN.md)。下面是**独立运行模式**（系统音频环回）的完整说明，
-> 插件包里 `data/engine/` 下的引擎二进制同样支持这种用法。
+> 本文只讲怎么用，不涉及源码编译，也不列出源码目录结构。
 
-## 1. 准备
+---
 
-1. 下载/解压对应平台的 release 包。
-2. 把整个文件夹复制到 OBS Studio 安装目录（任意子目录都行，不会写注册表）。
-3. 准备一个大模型 API Key：
-   * **阿里云百炼（DashScope）**：开通 *实时语音翻译* 服务后，在控制台拿到 `sk-...` 形式的 key。
-   * **OpenAI**：拿到 `sk-...` 形式的 key，并保证账号开通了 Realtime API 权限。
-   * **Mock**：随便填，不消耗额度，只用来调试 UI。
+## 一、安装插件
 
-## 2. 启动
+1. 打开 [Releases](https://github.com/buxicim2026/stream-live-translate/releases) 页面。
+2. 下载最新版本的压缩包。
+3. 解压后，将 `stream-live-translate` 文件夹复制到 OBS 的插件目录：
+   - **Windows**：解压之后，文件要复制到OBS安装目录， dll文件要放 <OBS安装目录>\obs-plugins\64bit\，data目录要放 <OBS安装目录>\data\obs-plugins\stream-live-translate\（需要管理员权限，需要自行新建stream-live-translate\文件夹）。放好后重启 OBS。
+   - **Linux**：`~/.config/obs-studio/plugins/`
+   - **macOS**：`~/Library/Application Support/obs-studio/plugins/`
+4. 重启 OBS。
 
-* Windows：双击 `launcher.bat`
-* macOS / Linux：终端里 `./launcher.sh`（或者 `open launcher.sh`）
+---
 
-启动器会：
-1. 后台拉起 `stream-live-translate(.exe)`；
-2. 自动打开 `http://127.0.0.1:8787/admin`；
-3. 写一份 `config.toml` 到可执行文件同目录（第一次），里面是默认值。
+## 二、配置大模型 API Key
 
-## 3. 在管理面板里填 Key
+1. 在 OBS 顶部菜单打开 **“停靠部件” → “自定义浏览器停靠部件”**。
+2. 添加直播译站管理面板。
+3. 在管理面板中填入你的大模型 API Key：
+   - 通义千问：前往 [阿里云百炼（千问AI平台）](https://bailian.console.aliyun.com/) 获取
+   - 智谱 GLM：前往 [智谱开放平台](https://open.bigmodel.cn/) 获取
+   - OpenAI：前往 [OpenAI Platform](https://platform.openai.com/) 获取
+   - （使用自己的api key你应该懂的，这部分得花钱的，如果你不知道怎么部署，直接找我要定制专属版本）
+4. 选择合适的模型（推荐 `qwen3.8-livetranslate-flash-realtime` `qwen-audio-3.1-asr-flash-message`）。
+5. 点击保存。
 
-打开 `http://127.0.0.1:8787/admin`（OBS 内也支持钉到侧边栏，见 §6）。
+---
 
-把 API Key 粘到 **大模型** 那张卡里：
+## 三、在 OBS 中开始使用
 
-* Provider 选 `Qwen Realtime (DashScope)` 或 `OpenAI Realtime`；
-* Model 填模型名（默认 `qwen3.5-livetranslate-flash-realtime`，要换别的直接改）；
-* API Key 填你自己的 key；
-* **保存配置**。
+1. 在 OBS 中，右键需要翻译的 **媒体源**（如视频采集设备、媒体源等）。
+2. 选择 **“滤镜” → 添加滤镜 → 实时字幕捕获**。
+3. 添加一个字幕显示层：
+   - 点击 **“来源”面板的 + 号 → 浏览器**。
+   - URL 填入管理面板中显示的地址。
+   - 根据需要调整宽度和高度。
+4. 开始直播或录制，字幕会自动出现在画面中。
 
-填完 Key 后会自动重启音频→LLM 管线。状态条会显示：
+---
 
-* 🟢 音频 — 抓取到声音
-* 🟢 大模型 — 与 Qwen / OpenAI 握手成功
-* 🟢 OBS — 与 OBS Studio 连接成功（如果 OBS 在跑）
+## 四、使用建议
 
-## 4. 在 OBS 里加字幕源
+- 建议先在本机录屏测试，确认字幕位置和大小合适后再正式直播。
+- 如果直播中音乐较多，可保持 VAD / 音乐检测开启，避免音乐片段被误翻译。
+- 中文内容会自动直通，不会重复翻译。
+- 如果网络波动，插件会尝试自动重连 WebSocket。
 
-OBS 主界面 -> 底部"来源" -> **+** -> **浏览器**：
+---
 
-* URL：`http://127.0.0.1:8787/overlay`
-* 宽度：`1920`，高度：`240`（按你的直播分辨率调）
-* 勾上"控件"里的"当源显示时刷新"
-* "自定义 CSS"留空（我们用自己写的样式）
+## 五、常见问题
 
-把这个源放在最上面的图层（字幕要在画面顶部），拖到画面下沿。
+**Q：字幕不显示？**  
+A：检查 API Key 是否填写正确，是否选择了支持实时流式翻译的模型，以及浏览器源 URL 是否与管理面板一致。
 
-> 💡 想换样式？在 URL 后面加 hash 参数，例如：
-> `#size=56&color=%23ffe66d&bg=%23000000ff&position=bottom&animation=typewriter`
+**Q：翻译延迟高？**  
+A：尝试更换网络环境，或选择延迟更低的模型接口。
 
-## 5. 听一下
+**Q：中文内容也被翻译了？**  
+A：插件会自动检测中文并直通不翻译。如果出现异常，请检查源音频的语言设置。（部分模型没有翻译功能）
 
-打开任意有声内容（电影、音乐、自己的麦克风都行）。字幕窗口会：
+**Q：如何调整字幕样式？**  
+A：在管理面板中可以自定义字体、颜色、大小和背景效果。
 
-* **中文输入**：原样输出（不调用翻译，省 token）；
-* **英文 / 日文 / 韩文 / 其它语种**：自动同传成中文。
+**Q：OBS 里找不到管理面板？**  
+A：请确认插件已正确复制到 OBS 插件目录，并重启 OBS。然后在“停靠部件”中查找。
 
-静音 / 纯音乐片段会被过滤，不会上送 token。
+---
 
-## 6. 把控制台钉到 OBS 侧边栏
+## 六、v0.0.34 变更日志
 
-OBS 顶部菜单 -> **工具** -> **自定义浏览器停靠面板 (Custom Browser Docks...)**：
-* 名称：`Live Translate`
-* URL：管理面板里"自动生成"那一行已写好（形如 `http://127.0.0.1:8787/admin?obsDock=1`）
-
-确定之后，OBS 主界面会多一个侧边标签页，OBS 重启后还会保留。
-
-## 7. 让字幕同时显示在 OBS 文本源里
-
-如果想要字幕"硬"显示在画面（不是浏览器源），管理面板里打开"通过 OBS Text Source 镜像"开关（`obs.mirror_to_text_source`）。插件会：
-
-* 自动在你的当前场景里新建一个名为 `Subtitles` 的 GDI+ 文本源；
-* 每次字幕更新就同步写入这个文本源；
-* 失败（场景名含中文 / 名字冲突）会显示在状态条上。
-
-## 8. 关掉插件
-
-* 直接关终端窗口 / 任务管理器结束 `stream-live-translate(.exe)`。
-* 想"暂停字幕"但保留进程：在管理面板里把 API Key 清空并保存，LLM 会自动断开，音频继续抓但不上送。
-
-## 9. 跨设备跑
-
-默认服务只绑 `127.0.0.1`，别的机器访问不到。想跨设备看（很常见的远程直播场景）：
-
-```bash
-stream-live-translate --host 0.0.0.0 --port 8787
-```
-
-⚠️ 这种模式 API Key 会以 URL 不带 query 的方式走明文 HTTP（127.0.0.1 之外不安全）。生产场景建议接 nginx / Caddy 反向代理 + TLS。
+- **新增**：浏览器源字幕支持自定义 CSS 动画效果
+- **优化**：VAD 静音检测灵敏度调优，减少误跳过
+- **优化**：WebSocket 断线重连逻辑，提升弱网环境稳定性
+- **修复**：修复 Linux 下部分音频源无法捕获的问题
+- **修复**：修复管理面板在 OBS 深色主题下部分文字不可见的问题
+- **修复**：修复字幕换行在长文本场景下偶尔错位的问题
