@@ -1145,11 +1145,38 @@
     });
   }
 
+  // ---- 品牌名：中文系统显示「直播译站」，其它系统保持英文原名 --------------
+  // 语言取自后端 /api/locale —— 它读的是**宿主系统语言**（不是浏览器语言），
+  // 与插件在 OBS 里的名称（locale 文件）保持同一套判断。任何一步失败都静默
+  // 回退，保底就是 HTML 里写死的英文名，绝不因为改名把面板弄挂。
+  async function applyBrand() {
+    try {
+      let lang = "";
+      let brand = "";
+      try {
+        const loc = await apiGet("/api/locale");
+        lang = (loc && loc.language) || "";
+        brand = (loc && loc.brand) || "";
+      } catch {
+        /* 后端还没起来：退回浏览器语言判断 */
+      }
+      if (!lang) lang = navigator.language || "";
+      const zh = lang.toLowerCase().startsWith("zh");
+      if (!brand) brand = zh ? "直播译站" : "Stream Live Translate";
+      const el = document.querySelector(".brand-name");
+      if (el) el.textContent = brand;
+      document.title = zh ? brand + " · 控制台" : brand;
+    } catch (e) {
+      console.warn("[admin] brand:", e);
+    }
+  }
+
   // ---- 启动 ------------------------------------------------------------
   async function boot() {
     try {
       bindEvents();
       setupFileImport();
+      applyBrand();
       await loadConfig();
       await loadDevices();
       loadStatus();

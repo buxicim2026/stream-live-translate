@@ -801,7 +801,7 @@ bool obs_module_load(void)
 #endif
 
 	obs_register_source(&filter_info);
-	blog(LOG_INFO, "[SLT] Stream Live Translate plugin loaded (v0.0.6.1)");
+	blog(LOG_INFO, "[SLT] stream-live-translate plugin loaded");
 	return true;
 }
 

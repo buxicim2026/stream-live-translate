@@ -337,8 +337,23 @@ fn ui_language() -> &'static str {
     }
 }
 
+/// Product name shown in the UI, localised by host OS language:
+/// 「直播译站」on Chinese hosts, the original English name everywhere else.
+fn ui_brand() -> &'static str {
+    if ui_language() == "zh" {
+        "直播译站"
+    } else {
+        "Stream Live Translate"
+    }
+}
+
 async fn get_locale() -> Response {
-    axum::Json(serde_json::json!({ "language": ui_language() })).into_response()
+    axum::Json(serde_json::json!({
+        "language": ui_language(),
+        // 前端直接用它渲染品牌名，避免两边各写一份文案。
+        "brand": ui_brand(),
+    }))
+    .into_response()
 }
 
 #[derive(serde::Serialize)]
