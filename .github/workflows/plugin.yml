@@ -13,7 +13,12 @@ name: OBS Plugin
 on:
   push:
     tags: ["v*"]
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing release tag to attach rebuilt packages to (empty = build only, no publishing)"
+        required: false
+        default: ""
 
 env:
   CARGO_TERM_COLOR: always
@@ -79,7 +84,9 @@ jobs:
             release/stream-live-translate-obs-linux-x64-*.tar.gz.sha256
 
   macos-arm64:
-    runs-on: macos-14
+    # macos-14 now maps to the retired "macos-14-arm64-us-default"
+    # configuration; macos-latest is the arm64 runner used by release.yml.
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -105,7 +112,10 @@ jobs:
 
   release:
     needs: [win-x64, linux-x64, macos-arm64]
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Normal path: a v* tag was pushed. Manual path: rebuild all three
+    # packages and attach them to an ALREADY published release, without
+    # creating a new version or touching the tag.
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag != '')
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -118,6 +128,8 @@ jobs:
       - name: Publish to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event.inputs.release_tag || github.ref_name }}
           files: |
             artifacts/**/*
-          generate_release_notes: true
+          # Do not rewrite the notes of an existing release on a manual rebuild.
+          generate_release_notes: ${{ github.event_name == 'push' }}

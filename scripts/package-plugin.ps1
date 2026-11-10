@@ -46,19 +46,34 @@ function Step([string]$msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
 # --- 0. Locate the installed OBS and read its version ----------------------
 function Resolve-ObsInstallDir {
     param([string]$Explicit)
-    if ($Explicit) {
-        if (Test-Path (Join-Path $Explicit 'bin\64bit\obs.dll')) { return $Explicit }
+    # [IO.Path]::Combine is a pure string operation. Join-Path resolves the
+    # provider and THROWS "Cannot find drive. A drive with the name 'E' does
+    # not exist." on CI runners without a D:/E: volume; with
+    # $ErrorActionPreference = "Stop" that aborted the whole Windows build.
+    $candidates = @()
+    if ($Explicit) { $candidates += $Explicit }
+    if ($env:ProgramFiles) {
+        $candidates += ($env:ProgramFiles.TrimEnd('\') + '\obs-studio')
     }
-    $candidates = @(
-        (Join-Path $env:ProgramFiles 'obs-studio'),
-        (Join-Path ${env:ProgramFiles(x86)} 'obs-studio'),
+    if (${env:ProgramFiles(x86)}) {
+        $candidates += (${env:ProgramFiles(x86)}.TrimEnd('\') + '\obs-studio')
+    }
+    $candidates += @(
         'C:\Program Files\obs-studio',
         'D:\Program Files\obs-studio',
         'D:\obs-studio',
         'E:\Program Files\obs-studio'
     )
     foreach ($c in $candidates) {
-        if ($c -and (Test-Path (Join-Path $c 'bin\64bit\obs.dll'))) { return $c }
+        if (-not $c) { continue }
+        # Hosted CI runners only have C:. Never let a candidate on a
+        # non-existent volume become a terminating error.
+        if ($c -match '^([A-Za-z]):' -and
+            -not (Get-PSDrive -Name $Matches[1] -PSProvider FileSystem -ErrorAction SilentlyContinue)) {
+            continue
+        }
+        $dll = [System.IO.Path]::Combine($c, 'bin', '64bit', 'obs.dll')
+        if (Test-Path -LiteralPath $dll) { return $c }
     }
     foreach ($key in @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
                        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
@@ -66,7 +81,8 @@ function Resolve-ObsInstallDir {
         foreach ($item in (Get-ItemProperty $key -ErrorAction SilentlyContinue)) {
             if ($item.DisplayName -match 'OBS Studio' -and $item.InstallLocation) {
                 $c = $item.InstallLocation
-                if (Test-Path (Join-Path $c 'bin\64bit\obs.dll')) { return $c }
+                $dll = [System.IO.Path]::Combine($c, 'bin', '64bit', 'obs.dll')
+                if (Test-Path -LiteralPath $dll) { return $c }
             }
         }
     }
