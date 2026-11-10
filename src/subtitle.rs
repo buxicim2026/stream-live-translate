@@ -99,6 +99,14 @@ impl SubtitleSink {
                         line.language = lang;
                     }
                     s.history.push(line.clone());
+                    // Some providers emit Final without a preceding Partial.
+                    // Apply the same bound as the other branch, otherwise
+                    // history grows without limit during a long stream and
+                    // /api/subtitles clones the whole Vec on every request.
+                    if s.history.len() > 200 {
+                        let drop = s.history.len() - 200;
+                        s.history.drain(0..drop);
+                    }
                     s.current = None;
                 }
             }

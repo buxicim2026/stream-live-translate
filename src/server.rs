@@ -501,13 +501,16 @@ async fn ws_loop(mut socket: WebSocket, state: Arc<AppState>) {
             }
             // Overlay style saved from the admin panel: restyle live.
             cfg = cfg_rx.recv() => {
-                // Err means the sender is gone (shutting down); bail out
-                // instead of spinning on a permanently-ready branch.
-                if cfg.is_err() {
-                    return;
-                }
-                if !send_config(&mut socket, &state).await {
-                    return;
+                match cfg {
+                    Ok(()) => {
+                        if !send_config(&mut socket, &state).await {
+                            return;
+                        }
+                    }
+                    // A slow client falling behind must not close its own
+                    // overlay socket and trigger a reconnect storm.
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
                 }
             }
             msg = socket.recv() => {

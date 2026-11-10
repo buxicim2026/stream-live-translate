@@ -11,6 +11,25 @@
  *
  * Everything else (VAD / music detection, language detection, LLM, the
  * subtitle overlay and the admin panel) lives in the engine.
+ *
+ * --- OBS 30+ version compatibility -------------------------------------
+ * This DLL is deliberately NOT tied to one OBS release:
+ *
+ *   * Source registration uses obs_register_source_s(info, size). libobs
+ *     allocates a struct obs_source_info of its OWN size, copies only
+ *     `size` bytes from the plugin, and zero-fills the remainder. That is
+ *     libobs' official ABI-compatibility mechanism: a plugin compiled
+ *     against older headers works on newer OBS (new callbacks are simply
+ *     NULL), and vice versa (extra fields are ignored). Since OBS 30 the
+ *     leading fields of obs_source_info have only ever been appended to.
+ *   * obs_module_ver() is only required to exist; libobs does not compare
+ *     it against LIBOBS_API_VER when loading a module.
+ *   * No libobs threading API is used: the sender uses native events so
+ *     there is no hand-written (and version-sensitive) forward declaration.
+ *
+ * In other words: build once against ANY OBS 30+ headers, run on OBS 30,
+ * 31, 32, 33 and later. The import library must still be generated from
+ * the actual installed obs.dll (see scripts/package-plugin.*).
  */
 
 #ifdef _WIN32
@@ -23,6 +42,7 @@
 #include <media-io/audio-io.h>
 #include <util/platform.h>
 
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -42,6 +62,7 @@ typedef SOCKET slt_sock_t;
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
@@ -54,24 +75,22 @@ typedef int slt_sock_t;
 #define SLT_INGEST_RATE 16000
 #define SLT_RMS_GATE 0.0005f
 
-/* OBS's util/threading.h unconditionally includes <pthread.h> (OBS builds
- * with pthreads on every platform), which breaks standalone MSVC builds of
- * this plugin. We only need the os_event API, which libobs exports, so
- * forward-declare it instead of including the header. */
-struct os_event_data;
-typedef struct os_event_data os_event_t;
-enum os_event_type {
-	OS_EVENT_TYPE_AUTO,
-	OS_EVENT_TYPE_MANUAL,
-};
-extern int os_event_init(os_event_t **event, enum os_event_type type);
-extern void os_event_destroy(os_event_t *event);
-extern int os_event_timedwait(os_event_t *event, unsigned long milliseconds);
-extern int os_event_try(os_event_t *event);
-extern int os_event_signal(os_event_t *event);
+/* 2 MiB holds ~22 s at 48 kHz; overflow drops the newest data, which only
+ * happens if the engine is unreachable for a long time anyway. */
+#define SLT_RING_BYTES (2 * 1024 * 1024)
 
-/* OBS's util/threading.h does not expose a plain mutex type (only os_event /
- * os_sem), so wrap the native primitives directly. */
+/* Never malloc on the OBS real-time audio thread: downmix in fixed-size
+ * stack chunks instead. */
+#define SLT_MONO_CHUNK 1024
+
+/* A stalled engine must not be able to block obs_module_unload() forever. */
+#define SLT_SEND_TIMEOUT_MS 300
+#define SLT_RECONNECT_WAIT_MS 500
+
+/* ---------------------------------------------------------------------- */
+/* Native mutex (libobs does not expose a plain mutex type)                */
+/* ---------------------------------------------------------------------- */
+
 #ifdef _WIN32
 typedef CRITICAL_SECTION slt_mutex_t;
 #else
@@ -115,29 +134,160 @@ static void slt_mutex_unlock(slt_mutex_t *m)
 }
 
 /* ---------------------------------------------------------------------- */
+/* Native wake / stop events                                               */
+/*                                                                         */
+/* Replaces libobs' os_event API. util/threading.h unconditionally         */
+/* includes <pthread.h>, which breaks standalone MSVC builds; forward-     */
+/* declaring those functions by hand instead ties the DLL to one libobs    */
+/* ABI. Native primitives solve both problems and let unload() interrupt   */
+/* the sender thread deterministically.                                    */
+/* ---------------------------------------------------------------------- */
+
+#ifdef _WIN32
+typedef struct {
+	HANDLE wake; /* auto-reset   */
+	HANDLE stop; /* manual-reset */
+} slt_events_t;
+#else
+typedef struct {
+	pthread_mutex_t mutex;
+	pthread_cond_t cond;
+	bool wake;
+	bool stop;
+} slt_events_t;
+#endif
+
+static bool slt_events_init(slt_events_t *e)
+{
+	memset(e, 0, sizeof(*e));
+#ifdef _WIN32
+	e->wake = CreateEventA(NULL, FALSE, FALSE, NULL);
+	e->stop = CreateEventA(NULL, TRUE, FALSE, NULL);
+	if (!e->wake || !e->stop) {
+		if (e->wake)
+			CloseHandle(e->wake);
+		if (e->stop)
+			CloseHandle(e->stop);
+		memset(e, 0, sizeof(*e));
+		return false;
+	}
+	return true;
+#else
+	if (pthread_mutex_init(&e->mutex, NULL) != 0)
+		return false;
+	if (pthread_cond_init(&e->cond, NULL) != 0) {
+		pthread_mutex_destroy(&e->mutex);
+		return false;
+	}
+	return true;
+#endif
+}
+
+static void slt_events_destroy(slt_events_t *e)
+{
+#ifdef _WIN32
+	if (e->wake)
+		CloseHandle(e->wake);
+	if (e->stop)
+		CloseHandle(e->stop);
+#else
+	pthread_cond_destroy(&e->cond);
+	pthread_mutex_destroy(&e->mutex);
+#endif
+	memset(e, 0, sizeof(*e));
+}
+
+static void slt_events_signal(slt_events_t *e)
+{
+#ifdef _WIN32
+	if (e->wake)
+		SetEvent(e->wake);
+#else
+	pthread_mutex_lock(&e->mutex);
+	e->wake = true;
+	pthread_cond_broadcast(&e->cond);
+	pthread_mutex_unlock(&e->mutex);
+#endif
+}
+
+static void slt_events_stop(slt_events_t *e)
+{
+#ifdef _WIN32
+	if (e->stop)
+		SetEvent(e->stop);
+#else
+	pthread_mutex_lock(&e->mutex);
+	e->stop = true;
+	pthread_cond_broadcast(&e->cond);
+	pthread_mutex_unlock(&e->mutex);
+#endif
+}
+
+static bool slt_events_is_stopped(slt_events_t *e)
+{
+#ifdef _WIN32
+	return e->stop && WaitForSingleObject(e->stop, 0) == WAIT_OBJECT_0;
+#else
+	bool stopped;
+	pthread_mutex_lock(&e->mutex);
+	stopped = e->stop;
+	pthread_mutex_unlock(&e->mutex);
+	return stopped;
+#endif
+}
+
+/* Returns true when stop was signalled, false on wake or timeout. */
+static bool slt_events_wait(slt_events_t *e, unsigned long ms)
+{
+#ifdef _WIN32
+	HANDLE handles[2] = {e->wake, e->stop};
+	DWORD r = WaitForMultipleObjects(2, handles, FALSE, (DWORD)ms);
+	return r == WAIT_OBJECT_0 + 1;
+#else
+	struct timespec ts;
+	int rc = 0;
+	bool stopped;
+
+	clock_gettime(CLOCK_REALTIME, &ts);
+	ts.tv_sec += (time_t)(ms / 1000);
+	ts.tv_nsec += (long)(ms % 1000) * 1000000L;
+	if (ts.tv_nsec >= 1000000000L) {
+		ts.tv_sec += 1;
+		ts.tv_nsec -= 1000000000L;
+	}
+
+	pthread_mutex_lock(&e->mutex);
+	while (!e->stop && !e->wake && rc != ETIMEDOUT)
+		rc = pthread_cond_timedwait(&e->cond, &e->mutex, &ts);
+	e->wake = false;
+	stopped = e->stop;
+	pthread_mutex_unlock(&e->mutex);
+	return stopped;
+#endif
+}
+
+/* ---------------------------------------------------------------------- */
 /* Shared sender state                                                     */
 /* ---------------------------------------------------------------------- */
 
-/* Ring buffer of s16le mono PCM captured at the OBS audio output rate.
- * 2 MiB holds ~22 s at 48 kHz; overflow drops the newest data, which only
- * happens if the engine is unreachable for a long time anyway. */
-#define SLT_RING_BYTES (2 * 1024 * 1024)
-
 struct slt_sender {
+	/* guards ring / in_rate / resample_pos / port / reconnect_requested */
 	slt_mutex_t mutex;
-	os_event_t *wake;
-	os_event_t *stop;
+	slt_events_t events;
 	uint8_t *ring;
 	size_t head; /* write position */
 	size_t tail; /* read position  */
 	size_t used;
 
+	/* owned exclusively by the sender thread */
 	slt_sock_t sock;
-	uint32_t port;
-	volatile bool reconnect_requested;
-	uint32_t in_rate;       /* sample rate the ring is filled at */
-	double resample_pos;    /* fractional linear-resampler state */
 	bool header_sent;
+
+	uint32_t port;
+	bool reconnect_requested;
+	uint32_t in_rate;    /* sample rate the ring is filled at */
+	double resample_pos; /* fractional linear-resampler state */
+	bool external_engine;/* engine was started outside this plugin */
 
 #ifdef _WIN32
 	HANDLE engine_proc;
@@ -150,6 +300,8 @@ struct slt_sender {
 
 static struct slt_sender g_sender;
 static volatile bool g_sender_started = false;
+/* Set once by obs_module_unload(); read by the audio thread and sender. */
+static volatile bool g_stopping = false;
 #ifdef _WIN32
 static HANDLE g_thread;
 #else
@@ -162,7 +314,7 @@ static pthread_t g_thread;
 
 static void ring_push(const uint8_t *data, size_t len)
 {
-	if (len == 0)
+	if (len == 0 || len > SLT_RING_BYTES)
 		return;
 	if (len > SLT_RING_BYTES - g_sender.used) {
 		/* Engine is not draining; drop instead of building latency. */
@@ -213,6 +365,21 @@ static slt_sock_t slt_connect(uint16_t port)
 #endif
 #endif
 
+	/* A bounded send timeout is essential. Without it a stalled engine
+	 * can block send() indefinitely, and obs_module_unload() would then
+	 * free the mutex/ring/WSA out from under the still-running sender
+	 * (a use-after-free inside the OBS process). */
+#ifdef _WIN32
+	DWORD send_to = SLT_SEND_TIMEOUT_MS;
+	setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const char *)&send_to,
+		   sizeof(send_to));
+#else
+	struct timeval send_to;
+	send_to.tv_sec = 0;
+	send_to.tv_usec = SLT_SEND_TIMEOUT_MS * 1000;
+	setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &send_to, sizeof(send_to));
+#endif
+
 	struct sockaddr_in addr;
 	memset(&addr, 0, sizeof(addr));
 	addr.sin_family = AF_INET;
@@ -250,18 +417,35 @@ static bool slt_send_all(slt_sock_t s, const uint8_t *buf, size_t len)
 	size_t off = 0;
 	while (off < len) {
 #ifdef _WIN32
-		int n = send(s, (const char *)buf + off, (int)(len - off), 0);
+		int n;
+#else
+		ssize_t n;
+#endif
+		if (g_stopping)
+			return false;
+#ifdef _WIN32
+		n = send(s, (const char *)buf + off, (int)(len - off), 0);
 #else
 		/* MSG_NOSIGNAL is a Linux/glibc extension and is undefined on
 		 * macOS / BSD; there we rely on SO_NOSIGPIPE (set in
 		 * slt_connect) to avoid SIGPIPE. */
 #ifdef MSG_NOSIGNAL
-		ssize_t n = send(s, buf + off, len - off, MSG_NOSIGNAL);
+		n = send(s, buf + off, len - off, MSG_NOSIGNAL);
 #else
-		ssize_t n = send(s, buf + off, len - off, 0);
+		n = send(s, buf + off, len - off, 0);
 #endif
 #endif
-		if (n <= 0)
+		if (n < 0) {
+#ifdef _WIN32
+			if (WSAGetLastError() == WSAEINTR)
+				continue;
+#else
+			if (errno == EINTR)
+				continue;
+#endif
+			return false;
+		}
+		if (n == 0)
 			return false;
 		off += (size_t)n;
 	}
@@ -296,6 +480,10 @@ static void engine_spawn(void)
 	if (engine_already_running(SLT_INGEST_PORT_DEFAULT)) {
 		blog(LOG_INFO,
 		     "[SLT] engine already running, not spawning a second one");
+		/* Standalone engine / another OBS instance owns the port.
+		 * Remember that so engine_ensure_running() does not retry a
+		 * spawn (and an extra ingest connection) every 10 seconds. */
+		g_sender.external_engine = true;
 		bfree((void *)exe);
 		return;
 	}
@@ -389,6 +577,7 @@ static void engine_spawn(void)
 	blog(LOG_INFO, "[SLT] engine spawned (pid %d)", (int)pid);
 #endif
 
+	g_sender.external_engine = false;
 	bfree((void *)exe);
 }
 
@@ -446,15 +635,25 @@ static void engine_ensure_running(void)
 #ifdef _WIN32
 	if (now - last_try < 10000)
 		return;
+#else
+	if (now - last_try < 10)
+		return;
+#endif
 	last_try = now;
+
+	if (g_sender.external_engine) {
+		/* Still owned by someone else? Then leave it alone. If the
+		 * port went away we take over and spawn our own engine. */
+		if (engine_already_running(SLT_INGEST_PORT_DEFAULT))
+			return;
+		g_sender.external_engine = false;
+	}
+
+#ifdef _WIN32
 	if (g_sender.engine_proc) {
 		CloseHandle(g_sender.engine_proc);
 		g_sender.engine_proc = NULL;
 	}
-#else
-	if (now - last_try < 10)
-		return;
-	last_try = now;
 #endif
 	blog(LOG_WARNING, "[SLT] engine is not running; (re)spawning it");
 	engine_spawn();
@@ -468,47 +667,60 @@ static size_t resample_and_send(const int16_t *in, size_t n)
 {
 	int16_t out[4096];
 	size_t produced = 0;
+	uint32_t in_rate;
+	double pos;
+	bool ok = true;
 
-	if (g_sender.in_rate == SLT_INGEST_RATE) {
-		if (!slt_send_all(g_sender.sock, (const uint8_t *)in,
-				  n * sizeof(int16_t)))
-			return 0;
-		g_sender.resample_pos = 0;
-		return n;
-	}
+	/* Snapshot the shared resampler state under the same lock the audio
+	 * callback uses. Reading/writing a double from two threads without
+	 * synchronisation is undefined behaviour in C. */
+	slt_mutex_lock(&g_sender.mutex);
+	in_rate = g_sender.in_rate ? g_sender.in_rate : SLT_INGEST_RATE;
+	pos = g_sender.resample_pos;
+	slt_mutex_unlock(&g_sender.mutex);
 
-	const double step = (double)g_sender.in_rate / SLT_INGEST_RATE;
-	double pos = g_sender.resample_pos;
+	if (in_rate == SLT_INGEST_RATE) {
+		ok = slt_send_all(g_sender.sock, (const uint8_t *)in,
+				  n * sizeof(int16_t));
+		pos = 0;
+	} else {
+		const double step = (double)in_rate / SLT_INGEST_RATE;
 
-	while (pos + 1.0 < (double)n) {
-		size_t i0 = (size_t)pos;
-		double t = pos - (double)i0;
-		double v = (1.0 - t) * in[i0] + t * in[i0 + 1];
-		if (v > 32767.0)
-			v = 32767.0;
-		if (v < -32768.0)
-			v = -32768.0;
-		out[produced++] = (int16_t)v;
-		pos += step;
+		while (pos + 1.0 < (double)n) {
+			size_t i0 = (size_t)pos;
+			double t = pos - (double)i0;
+			double v = (1.0 - t) * in[i0] + t * in[i0 + 1];
+			if (v > 32767.0)
+				v = 32767.0;
+			if (v < -32768.0)
+				v = -32768.0;
+			out[produced++] = (int16_t)v;
+			pos += step;
 
-		if (produced == 4096) {
-			if (!slt_send_all(g_sender.sock,
-					  (const uint8_t *)out,
-					  produced * sizeof(int16_t)))
-				return 0;
-			produced = 0;
+			if (produced == 4096) {
+				if (!slt_send_all(g_sender.sock,
+						  (const uint8_t *)out,
+						  produced * sizeof(int16_t))) {
+					ok = false;
+					break;
+				}
+				produced = 0;
+			}
 		}
-	}
-	if (produced > 0) {
-		if (!slt_send_all(g_sender.sock, (const uint8_t *)out,
-				  produced * sizeof(int16_t)))
-			return 0;
+		if (ok && produced > 0)
+			ok = slt_send_all(g_sender.sock,
+					  (const uint8_t *)out,
+					  produced * sizeof(int16_t));
+
+		pos -= (double)n;
+		if (pos < 0)
+			pos = 0;
 	}
 
-	g_sender.resample_pos = pos - (double)n;
-	if (g_sender.resample_pos < 0)
-		g_sender.resample_pos = 0;
-	return n;
+	slt_mutex_lock(&g_sender.mutex);
+	g_sender.resample_pos = pos;
+	slt_mutex_unlock(&g_sender.mutex);
+	return ok ? n : 0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -518,24 +730,33 @@ static size_t resample_and_send(const int16_t *in, size_t n)
 static void sender_loop(void)
 {
 	uint8_t *chunk = bmalloc(16 * 1024);
+	if (!chunk)
+		return;
 
 	for (;;) {
-		if (os_event_try(g_sender.stop) == 0)
+		uint32_t port;
+		bool reconnect;
+
+		if (g_stopping || slt_events_is_stopped(&g_sender.events))
 			break;
 
 		engine_ensure_running();
 
-		/* Filter settings asked for a reconnect (port change). */
-		if (g_sender.reconnect_requested &&
-		    g_sender.sock != SLT_INVALID_SOCK) {
+		/* Consistent snapshot of the shared connection settings. */
+		slt_mutex_lock(&g_sender.mutex);
+		port = g_sender.port;
+		reconnect = g_sender.reconnect_requested;
+		g_sender.reconnect_requested = false;
+		slt_mutex_unlock(&g_sender.mutex);
+
+		if (reconnect && g_sender.sock != SLT_INVALID_SOCK) {
 			slt_close(g_sender.sock);
 			g_sender.sock = SLT_INVALID_SOCK;
 		}
-		g_sender.reconnect_requested = false;
 
 		/* Ensure we are connected to the engine ingest port. */
 		if (g_sender.sock == SLT_INVALID_SOCK) {
-			g_sender.sock = slt_connect((uint16_t)g_sender.port);
+			g_sender.sock = slt_connect((uint16_t)port);
 			if (g_sender.sock != SLT_INVALID_SOCK) {
 				uint8_t header[12];
 				memcpy(header, "SLTA", 4);
@@ -549,17 +770,22 @@ static void sender_loop(void)
 					g_sender.sock = SLT_INVALID_SOCK;
 				} else {
 					g_sender.header_sent = true;
+					slt_mutex_lock(&g_sender.mutex);
 					g_sender.resample_pos = 0;
+					slt_mutex_unlock(&g_sender.mutex);
 					blog(LOG_INFO,
 					     "[SLT] connected to engine ingest port %u",
-					     g_sender.port);
+					     port);
 				}
 			}
 		}
 
-		/* Wait for audio (or reconnect timeout). */
-		os_event_timedwait(g_sender.wake, 500);
-
+		/* Wait for audio (or reconnect timeout). The stop event wakes
+		 * this immediately during unload. */
+		if (slt_events_wait(&g_sender.events, SLT_RECONNECT_WAIT_MS))
+			break;
+		if (g_stopping)
+			break;
 		if (g_sender.sock == SLT_INVALID_SOCK)
 			continue;
 
@@ -576,12 +802,15 @@ static void sender_loop(void)
 			if (samples > 0 &&
 			    resample_and_send((const int16_t *)chunk,
 					      samples) == 0) {
-				blog(LOG_WARNING,
-				     "[SLT] ingest send failed, reconnecting");
+				if (!g_stopping)
+					blog(LOG_WARNING,
+					     "[SLT] ingest send failed, reconnecting");
 				slt_close(g_sender.sock);
 				g_sender.sock = SLT_INVALID_SOCK;
 				break;
 			}
+			if (g_stopping)
+				break;
 		}
 	}
 
@@ -645,17 +874,29 @@ static obs_properties_t *filter_properties(void *unused)
 static void *filter_create(obs_data_t *settings, obs_source_t *source)
 {
 	struct slt_filter *f = bzalloc(sizeof(*f));
+	if (!f)
+		return NULL;
 	f->source = source;
 	f->enabled = obs_data_get_bool(settings, "enabled");
 	f->gate_silence = obs_data_get_bool(settings, "gate_silence");
 	f->port = (uint32_t)obs_data_get_int(settings, "port");
 
-	if ((uint32_t)obs_data_get_int(settings, "port") != g_sender.port) {
-		g_sender.port = (uint32_t)obs_data_get_int(settings, "port");
-		g_sender.reconnect_requested = true;
-	}
+	/* Deliberately do NOT touch the global ingest port here. A scene
+	 * collection can contain several capture filters carrying stale or
+	 * conflicting "port" settings; letting each create() overwrite the
+	 * shared port made the result depend on source load order and could
+	 * point the audio feed at the HTTP port. Only a genuine user edit
+	 * (see filter_update) changes it. */
 	blog(LOG_INFO, "[SLT] filter attached to source \"%s\"",
 	     obs_source_get_name(source));
+
+	slt_mutex_lock(&g_sender.mutex);
+	uint32_t shared_port = g_sender.port;
+	slt_mutex_unlock(&g_sender.mutex);
+	if (f->port != shared_port)
+		blog(LOG_WARNING,
+		     "[SLT] filter on \"%s\" has a saved port %u, but the shared ingest port is %u; the saved value is ignored",
+		     obs_source_get_name(source), f->port, shared_port);
 	return f;
 }
 
@@ -668,15 +909,26 @@ static void filter_destroy(void *data)
 static void filter_update(void *data, obs_data_t *settings)
 {
 	struct slt_filter *f = data;
+	if (!f)
+		return;
 	f->enabled = obs_data_get_bool(settings, "enabled");
 	f->gate_silence = obs_data_get_bool(settings, "gate_silence");
+
 	uint32_t port = (uint32_t)obs_data_get_int(settings, "port");
-	if (port != g_sender.port) {
-		g_sender.port = port;
+	if (port < 1024 || port > 65535)
+		port = SLT_INGEST_PORT_DEFAULT;
+
+	/* Only reached when the value really changed, i.e. when the user
+	 * edited the property. Loading a saved scene must not rewrite the
+	 * shared port. */
+	if (port != f->port) {
 		slt_mutex_lock(&g_sender.mutex);
+		g_sender.port = port;
+		g_sender.reconnect_requested = true;
 		g_sender.head = g_sender.tail = g_sender.used = 0;
 		slt_mutex_unlock(&g_sender.mutex);
-		g_sender.reconnect_requested = true;
+		f->port = port;
+		blog(LOG_INFO, "[SLT] ingest port changed to %u", port);
 	}
 }
 
@@ -684,71 +936,74 @@ static struct obs_audio_data *filter_audio(void *data,
 					   struct obs_audio_data *audio)
 {
 	struct slt_filter *f = data;
-	if (!f->enabled || !audio || audio->frames == 0)
+	if (!f || !f->enabled || !audio || audio->frames == 0)
 		return audio;
+
+	/* OBS audio filters receive planar float samples. For subtitles we
+	 * only need a mono downmix, so use at most the first two (L/R)
+	 * planes. Deriving the channel count from the *global* output
+	 * speaker layout is unsafe: an individual source can be mono, or be
+	 * reconfiguring while a media source reconnects, in which case
+	 * data[2..MAX_AV_PLANES] may hold stale pointers. Touching them
+	 * from the real-time audio thread is a plausible crash vector. */
+	const float *left = (const float *)audio->data[0];
+	if (!left)
+		return audio;
+	const float *right = (const float *)audio->data[1];
+	const float scale = right ? 0.5f : 1.0f;
 
 	const uint32_t frames = audio->frames;
-	/* struct obs_audio_data has no channel-layout field; derive the channel
-	 * count from the active audio output configuration instead. */
-	const struct audio_output_info *aoi =
-		audio_output_get_info(obs_get_audio());
-	const size_t channels = aoi ? get_audio_channels(aoi->speakers) : 0;
-	if (channels == 0) {
-		/* OBS audio output not ready yet; skip this frame silently. */
-		return audio;
-	}
-	if (channels > MAX_AV_PLANES) {
-		blog(LOG_WARNING,
-		     "[SLT] unsupported channel count %zu (max %d)",
-		     channels, MAX_AV_PLANES);
-		return audio;
-	}
 
-	/* OBS audio filters receive planar float samples. */
-	const float *planes[MAX_AV_PLANES];
-	for (size_t c = 0; c < channels; c++) {
-		planes[c] = (const float *)audio->data[c];
-		if (!planes[c])
+	/* Pass 1: RMS gate, allocation-free. */
+	if (f->gate_silence) {
+		double sq_sum = 0.0;
+		for (uint32_t i = 0; i < frames; i++) {
+			float v = left[i] + (right ? right[i] : 0.0f);
+			v *= scale;
+			sq_sum += (double)v * v;
+		}
+		if ((float)sqrt(sq_sum / (double)frames) < SLT_RMS_GATE)
 			return audio;
 	}
 
-	const float inv_ch = 1.0f / (float)channels;
-	int16_t *mono = bmalloc(frames * sizeof(int16_t));
-	double sq_sum = 0.0;
+	audio_t *ao = obs_get_audio();
+	const uint32_t rate = ao ? audio_output_get_sample_rate(ao) : 48000;
 
-	for (uint32_t i = 0; i < frames; i++) {
-		float acc = 0.0f;
-		for (size_t c = 0; c < channels; c++)
-			acc += planes[c][i];
-		float v = acc * inv_ch;
-		sq_sum += (double)v * v;
-		if (v > 1.0f)
-			v = 1.0f;
-		else if (v < -1.0f)
-			v = -1.0f;
-		mono[i] = (int16_t)(v * 32767.0f);
-	}
+	/* Pass 2: fixed stack buffer, chunked so we never malloc/free on
+	 * the OBS real-time audio thread (one allocation per 10 ms frame
+	 * used to add jitter and allocator contention). */
+	int16_t mono[SLT_MONO_CHUNK];
+	for (uint32_t off = 0; off < frames; off += SLT_MONO_CHUNK) {
+		uint32_t n = frames - off;
+		if (n > SLT_MONO_CHUNK)
+			n = SLT_MONO_CHUNK;
 
-	const float rms = (float)sqrt(sq_sum / frames);
-	if (!f->gate_silence || rms >= SLT_RMS_GATE) {
-		const uint32_t rate =
-			audio_output_get_sample_rate(obs_get_audio());
+		for (uint32_t i = 0; i < n; i++) {
+			float v = left[off + i] +
+				  (right ? right[off + i] : 0.0f);
+			v *= scale;
+			if (v > 1.0f)
+				v = 1.0f;
+			else if (v < -1.0f)
+				v = -1.0f;
+			mono[i] = (int16_t)(v * 32767.0f);
+		}
+
 		slt_mutex_lock(&g_sender.mutex);
+		if (g_stopping) {
+			slt_mutex_unlock(&g_sender.mutex);
+			break;
+		}
 		if (rate != g_sender.in_rate) {
 			/* Sample rate changed: restart resampler state. */
 			g_sender.in_rate = rate ? rate : 48000;
 			g_sender.resample_pos = 0;
 			g_sender.head = g_sender.tail = g_sender.used = 0;
-			blog(LOG_INFO,
-			     "[SLT] audio sample rate set to %u",
-			     g_sender.in_rate);
 		}
-		ring_push((const uint8_t *)mono, frames * sizeof(int16_t));
+		ring_push((const uint8_t *)mono, (size_t)n * sizeof(int16_t));
 		slt_mutex_unlock(&g_sender.mutex);
-		os_event_signal(g_sender.wake);
+		slt_events_signal(&g_sender.events);
 	}
-
-	bfree(mono);
 	return audio;
 }
 
@@ -771,24 +1026,41 @@ static struct obs_source_info filter_info = {
 
 bool obs_module_load(void)
 {
+	memset(&g_sender, 0, sizeof(g_sender));
+	g_stopping = false;
+
 #ifdef _WIN32
 	if (WSAStartup(MAKEWORD(2, 2), &g_sender.wsa) != 0)
 		return false;
 #endif
 
 	g_sender.ring = bmalloc(SLT_RING_BYTES);
-	g_sender.head = g_sender.tail = g_sender.used = 0;
+	if (!g_sender.ring) {
+		blog(LOG_WARNING, "[SLT] out of memory allocating ring buffer");
+#ifdef _WIN32
+		WSACleanup();
+#endif
+		return false;
+	}
+
+	/* INVALID_SOCKET is not zero, so this must be set after the memset. */
 	g_sender.sock = SLT_INVALID_SOCK;
 	g_sender.port = SLT_INGEST_PORT_DEFAULT;
 	g_sender.in_rate = 48000;
-	g_sender.resample_pos = 0;
 #ifndef _WIN32
 	g_sender.engine_pid = -1;
 #endif
 
+	if (!slt_events_init(&g_sender.events)) {
+		blog(LOG_WARNING, "[SLT] failed to initialise sender events");
+		bfree(g_sender.ring);
+		g_sender.ring = NULL;
+#ifdef _WIN32
+		WSACleanup();
+#endif
+		return false;
+	}
 	slt_mutex_init(&g_sender.mutex);
-	os_event_init(&g_sender.wake, OS_EVENT_TYPE_AUTO);
-	os_event_init(&g_sender.stop, OS_EVENT_TYPE_MANUAL);
 
 	engine_spawn();
 
@@ -799,18 +1071,40 @@ bool obs_module_load(void)
 	g_sender_started =
 		pthread_create(&g_thread, NULL, sender_thread, NULL) == 0;
 #endif
+	if (!g_sender_started)
+		blog(LOG_WARNING, "[SLT] failed to start sender thread");
 
-	obs_register_source(&filter_info);
+	/* Explicitly pass OUR struct size. libobs copies exactly that many
+	 * bytes and zero-fills the rest of its own (possibly larger) struct,
+	 * which is what makes a single DLL work across OBS 30/31/32/33+.
+	 * The obs_register_source() macro does the same thing, but spelling
+	 * it out documents the compatibility contract. */
+	obs_register_source_s(&filter_info, sizeof(filter_info));
+
 	blog(LOG_INFO, "[SLT] stream-live-translate plugin loaded");
 	return true;
 }
 
 void obs_module_unload(void)
 {
+	/* 1. Signal stop and wake the sender. SO_SNDTIMEO bounds any
+	 *    in-flight send() to 300 ms, so the thread is guaranteed to
+	 *    reach its exit path promptly. */
+	g_stopping = true;
+	slt_events_stop(&g_sender.events);
+
+	/* 2. Only free shared state AFTER the thread has actually exited.
+	 *    The old fixed 3 s timeout could expire while sender_loop() was
+	 *    still using the mutex / ring / WSA, which produced a
+	 *    use-after-free crash inside OBS on shutdown. */
 	if (g_sender_started) {
-		os_event_signal(g_sender.stop);
 #ifdef _WIN32
-		WaitForSingleObject(g_thread, 3000);
+		if (WaitForSingleObject(g_thread, 10000) != WAIT_OBJECT_0) {
+			blog(LOG_WARNING,
+			     "[SLT] sender thread did not exit; keeping its state to avoid a crash");
+			engine_terminate();
+			return;
+		}
 		CloseHandle(g_thread);
 #else
 		pthread_join(g_thread, NULL);
@@ -820,8 +1114,7 @@ void obs_module_unload(void)
 
 	engine_terminate();
 
-	os_event_destroy(g_sender.stop);
-	os_event_destroy(g_sender.wake);
+	slt_events_destroy(&g_sender.events);
 	slt_mutex_destroy(&g_sender.mutex);
 	bfree(g_sender.ring);
 	g_sender.ring = NULL;

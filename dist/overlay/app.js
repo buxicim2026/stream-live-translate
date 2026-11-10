@@ -456,11 +456,16 @@
     }
   }
 
+  // 指数退避 + 抖动：引擎未启动 / OBS 重启时不要每 2s 永久新建 WebSocket，
+  // 常驻的 OBS CEF 页面会不断累积连接与内存。
+  let wsRetry = 0;
+
   function connectWS() {
     const wsScheme = location.protocol === "https:" ? "wss" : "ws";
     ws = new WebSocket(`${wsScheme}://${location.host}/ws/subtitles`);
     ws.addEventListener("open", () => {
       console.log("overlay ws connected");
+      wsRetry = 0;
       // 兜底：即使服务端是旧版（不会主动推 config），重连后也能拿到最新样式。
       loadConfig();
     });
@@ -484,7 +489,9 @@
       }
     });
     ws.addEventListener("close", () => {
-      setTimeout(connectWS, 2000);
+      const delay = Math.min(2000 * Math.pow(2, wsRetry), 30000);
+      wsRetry = Math.min(wsRetry + 1, 6);
+      setTimeout(connectWS, delay + Math.random() * 500);
     });
   }
 

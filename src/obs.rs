@@ -8,6 +8,7 @@
 //!     can open it as an in-OBS panel via OpenInputInteract (no external
 //!     browser window required after the very first launch).
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -27,6 +28,10 @@ use crate::AppState;
 /// panel inside OBS. Users can find it under Sources and use the
 /// "Interact" button to manage the plugin without leaving OBS.
 pub const DOCK_INPUT_NAME: &str = "StreamLiveTranslateAdmin";
+
+/// Register the dock source only once per engine process. Doing it on every
+/// reconnect repeatedly churns OBS inputs and the embedded CEF instance.
+static DOCK_REGISTERED: AtomicBool = AtomicBool::new(false);
 
 /// OBS 的文本源在不同平台根本不是同一个 input kind：
 ///   * Windows -> GDI+ (`text_gdiplus_v2`)
@@ -150,11 +155,20 @@ async fn try_connect(
     client: &Arc<Mutex<ObsClient>>,
 ) -> Result<()> {
     let url = format!("ws://{}:{}", cfg.host, cfg.port);
-    let (mut ws, _resp) = tokio_tungstenite::connect_async(&url)
-        .await
-        .with_context(|| format!("connect to OBS at {url}"))?;
+    // Bound the handshake. Without a timeout an endpoint that accepts the
+    // TCP connection but never sends Hello pins try_connect() forever, and
+    // run_loop() never reconnects after OBS restarts.
+    let (mut ws, _resp) = tokio::time::timeout(
+        Duration::from_secs(5),
+        tokio_tungstenite::connect_async(&url),
+    )
+    .await
+    .map_err(|_| anyhow!("OBS WebSocket connect timed out after 5s"))?
+    .with_context(|| format!("connect to OBS at {url}"))?;
 
-    let hello = read_json(&mut ws).await?;
+    let hello = tokio::time::timeout(Duration::from_secs(5), read_json(&mut ws))
+        .await
+        .map_err(|_| anyhow!("OBS WebSocket hello timed out"))??;
     if hello.get("op").and_then(|v| v.as_i64()) != Some(0) {
         return Err(anyhow!("unexpected OBS hello op"));
     }
@@ -191,15 +205,18 @@ async fn try_connect(
     ))
     .await?;
 
-    let identified = read_json(&mut ws).await.map_err(|e| {
-        if auth_required {
-            anyhow!(
-                "OBS 拒绝了认证（通常是 OBS WebSocket 密码不匹配：请在 工具 → WebSocket 服务器设置 中核对，或取消勾选“启用身份验证”）: {e}"
-            )
-        } else {
-            anyhow!("OBS closed during handshake: {e}")
-        }
-    })?;
+    let identified = tokio::time::timeout(Duration::from_secs(5), read_json(&mut ws))
+        .await
+        .map_err(|_| anyhow!("OBS WebSocket identify timed out"))?
+        .map_err(|e| {
+            if auth_required {
+                anyhow!(
+                    "OBS 拒绝了认证（通常是 OBS WebSocket 密码不匹配：请在 工具 → WebSocket 服务器设置 中核对，或取消勾选“启用身份验证”）: {e}"
+                )
+            } else {
+                anyhow!("OBS closed during handshake: {e}")
+            }
+        })?;
     if identified.get("op").and_then(|v| v.as_i64()) != Some(2) {
         return Err(anyhow!("OBS did not confirm identify"));
     }
@@ -221,22 +238,22 @@ async fn try_connect(
     let (cmd_tx, cmd_rx) = mpsc::channel::<ObsCommand>(32);
     client.lock().cmd_tx = Some(cmd_tx);
 
-    if cfg.register_dock {
+    if cfg.register_dock && !DOCK_REGISTERED.load(Ordering::SeqCst) {
         let admin_url = client.lock().admin_url.lock().clone();
         if let Some(url) = admin_url {
-            if let Err(e) =
-                ws_create_admin_browser_source(&mut write_half, &url).await
-            {
-                warn!(error = %e, "failed to auto-create admin browser source");
-            } else {
-                info!(input = DOCK_INPUT_NAME, "admin panel registered as in-OBS browser source");
+            match ws_create_admin_browser_source(&mut write_half, &url).await {
+                Ok(()) => {
+                    DOCK_REGISTERED.store(true, Ordering::SeqCst);
+                    info!(input = DOCK_INPUT_NAME, "admin panel registered as in-OBS browser source");
+                }
+                Err(e) => warn!(error = %e, "failed to auto-create admin browser source"),
             }
         }
     }
 
     let read_state = state.clone();
     let read_client = client.clone();
-    let read_handle = tokio::spawn(async move {
+    let mut read_handle = tokio::spawn(async move {
         while let Some(msg) = read_half.next().await {
             match msg {
                 Ok(Message::Text(t)) => {
@@ -266,7 +283,7 @@ async fn try_connect(
     });
 
     let write_client = client.clone();
-    let write_handle = tokio::spawn(async move {
+    let mut write_handle = tokio::spawn(async move {
         let mut cmd_rx = cmd_rx;
         while let Some(cmd) = cmd_rx.recv().await {
             match cmd {
@@ -300,7 +317,19 @@ async fn try_connect(
         }
     });
 
-    let _ = tokio::join!(read_handle, write_handle);
+    // Whichever half ends first means the connection is gone; abort the
+    // other and let run_loop() reconnect. tokio::join! used to wait for both,
+    // but cmd_tx is held open externally, so the write half never finished
+    // and the engine stopped reconnecting for the rest of the session.
+    let finished = tokio::select! {
+        _ = &mut read_handle => "read",
+        _ = &mut write_handle => "write",
+    };
+    if finished == "read" {
+        write_handle.abort();
+    } else {
+        read_handle.abort();
+    }
     Ok(())
 }
 
@@ -322,13 +351,15 @@ where
         }
     });
     write_half.send(Message::Text(update.to_string().into())).await?;
+    // sceneName is optional in OBS WebSocket v5. Omitting it creates the
+    // input without forcing it into a scene; the old literal "Current Scene"
+    // is not a real scene name and made CreateInput fail every time.
     let create = serde_json::json!({
         "op": 6,
         "d": {
             "requestType": "CreateInput",
             "requestId": uuid::Uuid::new_v4().to_string(),
             "requestData": {
-                "sceneName": "Current Scene",
                 "inputName": fallback,
                 "inputKind": OBS_TEXT_KIND,
                 "inputSettings": {
@@ -350,13 +381,14 @@ async fn ws_create_admin_browser_source<W>(write_half: &mut W, url: &str) -> Res
 where
     W: futures::Sink<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin,
 {
+    // sceneName is optional: leave it out so the dock input works regardless
+    // of what the user's scenes are called.
     let create = serde_json::json!({
         "op": 6,
         "d": {
             "requestType": "CreateInput",
             "requestId": uuid::Uuid::new_v4().to_string(),
             "requestData": {
-                "sceneName": "Current Scene",
                 "inputName": DOCK_INPUT_NAME,
                 "inputKind": "browser_source",
                 "inputSettings": {

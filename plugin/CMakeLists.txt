@@ -22,6 +22,15 @@ endif()
 #   -DOBS_STUB_LIB=<path>/libobs.so
 #
 # macOS uses -undefined dynamic_lookup and needs nothing extra.
+#
+# Version compatibility (OBS 30+):
+#   Headers from ANY 30+ tag are fine. plugin/stream-live-translate.c calls
+#   obs_register_source_s(info, size); libobs copies only `size` bytes into
+#   its own (possibly larger) struct and zeroes the remaining fields. That
+#   is libobs' official ABI contract, so a single module built here loads on
+#   OBS 30, 31, 32, 33 and later. Only the Windows import library has to
+#   match the installed obs.dll, which package-plugin.ps1 regenerates from
+#   the real DLL on every build.
 # ---------------------------------------------------------------------------
 
 if(NOT LIBOBS_INCLUDE_DIR)
